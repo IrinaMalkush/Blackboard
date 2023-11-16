@@ -10,6 +10,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
+    "styled-components": "^6.1.1",
     "typescript": "^4.9.5",
     "web-vitals": "^2.1.4"
   },
@@ -21,16 +22,16 @@
     "@types/node": "^20.8.6",
     "@types/react": "^18.2.28",
     "@types/react-dom": "^18.2.13",
-    "eslint": "^8.51.0",
-    "eslint-config-prettier": "^9.0.0",
-    "eslint-plugin-prettier": "^5.0.1",
-    "eslint-plugin-simple-import-sort": "^10.0.0",
-    "prettier": "^3.0.3",
     "concurrently": "^8.2.1",
     "cross-env": "^7.0.3",
     "electron": "^27.0.0",
     "electron-builder": "^24.6.4",
     "electronmon": "^2.0.2",
+    "eslint": "^8.51.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-prettier": "^5.0.1",
+    "eslint-plugin-simple-import-sort": "^10.0.0",
+    "prettier": "^3.0.3",
     "wait-on": "^7.0.1"
   },
   "scripts": {
@@ -40,6 +41,7 @@
     "eject": "react-scripts eject",
     "fix:lint": "eslint src/**/*.{ts,tsx} --fix",
     "fix:prettier": "prettier --write src/**/*.{json}",
+    "fix:prettier:public": "prettier --write public/**/*.{js,ts}",
     "electron:start": "concurrently -k \"cross-env BROWSER=none npm start\" \"wait-on http://127.0.0.1:3000 && electronmon .\""
   },
   "build": {

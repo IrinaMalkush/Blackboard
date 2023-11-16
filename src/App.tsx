@@ -1,11 +1,9 @@
-import "./App.css";
+import { Main } from "./pages/Main";
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        the blackboard app for Irina Dolgoniuk master's diploma
-      </header>
+    <div>
+      <Main />
     </div>
   );
 }
