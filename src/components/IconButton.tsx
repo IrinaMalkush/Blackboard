@@ -1,26 +1,27 @@
 import styled from "styled-components";
 
-interface IIconButton {
+export interface IIconButtonProps {
   icon: string;
   alt: string;
   onClick: () => void;
+  isActive: boolean;
 }
 
-export const IconButton = ({ icon, alt, onClick }: IIconButton) => {
+export const IconButton = ({ icon, alt, onClick, isActive }: IIconButtonProps) => {
   return (
-    <Button onClick={onClick}>
+    <Button onClick={onClick} $isActive={isActive}>
       <Icon alt={alt} src={icon} />
     </Button>
   );
 };
 
-const Button = styled.button`
+const Button = styled.button<{ $isActive?: boolean }>`
   height: 34px;
   width: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #dcdcdc;
+  background-color: ${(p) => (p.$isActive ? "#00abb3" : "#dcdcdc")};
   border: none;
   border-radius: 6px;
 `;

@@ -1,45 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Tools } from "../types/tools";
+import { ignoreKeys } from "../constants/ignoreKeys";
+import { ColorOfToolType } from "../types/colors";
+import { ToolsType } from "../types/tools";
+import { getCoordinates } from "../utils/getCoordinates";
 
-type CoordinatesType = {
+export type CoordinatesType = {
   x: number;
   y: number;
 };
 
-export const usePencilDraw = (selectedTool: Tools) => {
+export const usePencilDraw = (
+  selectedTool: ToolsType,
+  selectedColor: ColorOfToolType,
+  lineWidth: number,
+) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPainting, setIsPainting] = useState(false);
   const [mousePosition, setMousePosition] = useState<CoordinatesType | undefined>(undefined);
   const [snapshot, setSnapshot] = useState<ImageData | undefined>(undefined);
+  const [textPosition, setTextPosition] = useState<CoordinatesType | undefined>(undefined);
 
   /**
-   * Start drawing when the mouse is pressed
+   * Start drawing or typing when the mouse is pressed
    */
 
-  const startPaint = useCallback((event: MouseEvent) => {
-    const coordinates = getCoordinates(event);
-    if (coordinates) {
-      setIsPainting(true);
-      setMousePosition(coordinates);
+  const startPaint = useCallback(
+    (event: MouseEvent) => {
+      const coordinates = getCoordinates(event, canvasRef);
+      if (coordinates) {
+        if (selectedTool === "text") {
+          setTextPosition(coordinates);
+        } else {
+          setIsPainting(true);
+          setMousePosition(coordinates);
 
-      if (canvasRef.current) {
-        const canvas: HTMLCanvasElement = canvasRef.current;
-        const context = canvas.getContext("2d");
-        if (context) {
-          setSnapshot(context.getImageData(0, 0, canvas.width, canvas.height));
+          if (canvasRef.current) {
+            const canvas: HTMLCanvasElement = canvasRef.current;
+            const context = canvas.getContext("2d");
+            if (context) {
+              setSnapshot(context.getImageData(0, 0, canvas.width, canvas.height));
+            }
+          }
         }
       }
-    }
-  }, []);
-
-  const getCoordinates = (event: MouseEvent): CoordinatesType | undefined => {
-    if (!canvasRef.current) {
-      return;
-    }
-    const canvas: HTMLCanvasElement = canvasRef.current;
-    return { x: event.pageX - canvas.offsetLeft, y: event.pageY - canvas.offsetTop };
-  };
+    },
+    [selectedTool],
+  );
 
   useEffect(() => {
     if (!canvasRef.current) {
@@ -60,7 +67,7 @@ export const usePencilDraw = (selectedTool: Tools) => {
   const paint = useCallback(
     (event: MouseEvent) => {
       if (isPainting) {
-        const newMousePosition = getCoordinates(event);
+        const newMousePosition = getCoordinates(event, canvasRef);
         if (mousePosition && newMousePosition) {
           if (selectedTool === "pencil" || selectedTool === "eraser") {
             draw(mousePosition, newMousePosition);
@@ -81,9 +88,9 @@ export const usePencilDraw = (selectedTool: Tools) => {
     const canvas: HTMLCanvasElement = canvasRef.current;
     const context = canvas.getContext("2d");
     if (context) {
-      context.strokeStyle = selectedTool === "eraser" ? "#f9f8f8" : "red";
+      context.strokeStyle = selectedTool === "eraser" ? "#f9f8f8" : selectedColor;
       context.lineJoin = "round";
-      context.lineWidth = 3;
+      context.lineWidth = lineWidth;
 
       if (selectedTool === "pencil" || selectedTool === "eraser") {
         context.beginPath();
@@ -188,5 +195,41 @@ export const usePencilDraw = (selectedTool: Tools) => {
     };
   }, [exitPaint]);
 
-  return canvasRef;
+  /**
+   * Keyboard handling: printing text on canvas with the "text" tool selected.
+   */
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (selectedTool !== "text" || !textPosition) return;
+      if (ignoreKeys.includes(event.key)) {
+        return;
+      }
+
+      if (!canvasRef.current) return;
+      const canvas = canvasRef.current;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+
+      context.font = "16px sans-serif"; //todo цвет и шрифт
+      context.fillStyle = "black";
+
+      context.fillText(event.key, textPosition.x, textPosition.y);
+      const textWidth = context.measureText(event.key).width;
+      setTextPosition((prevPos) => {
+        if (!prevPos) return prevPos;
+        return {
+          x: prevPos.x + textWidth,
+          y: prevPos.y,
+        };
+      });
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectedTool, textPosition]);
+
+  return { canvasRef, isPainting, mousePosition, snapshot, startPaint, paint, exitPaint };
 };

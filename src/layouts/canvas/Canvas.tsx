@@ -1,16 +1,26 @@
 import { usePencilDraw } from "../../hooks/usePencilDraw";
-import { Tools } from "../../types/tools";
+import { ColorOfToolType } from "../../types/colors";
+import { ToolsType } from "../../types/tools";
 
 interface ICanvasProps {
-  selectedTool: Tools;
+  selectedTool: ToolsType;
+  selectedColor: ColorOfToolType;
+  lineWidth: number;
 }
 
-export const Canvas = ({ selectedTool }: ICanvasProps) => {
-  const canvasRef = usePencilDraw(selectedTool);
+export const Canvas = ({ selectedTool, selectedColor, lineWidth }: ICanvasProps) => {
+  const { canvasRef } = usePencilDraw(selectedTool, selectedColor, lineWidth);
 
   return (
     <div>
-      <canvas ref={canvasRef} height={window.innerHeight - 104} width={window.innerWidth}>
+      <canvas
+        ref={canvasRef}
+        role="img"
+        aria-label="canvas"
+        height={window.innerHeight - 104}
+        width={window.innerWidth}
+        data-selected-tool={selectedTool}
+      >
         canvas
       </canvas>
     </div>

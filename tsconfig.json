@@ -21,12 +21,18 @@
     "moduleResolution": "node",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    "types": [
+      "node",
+      "jest",
+      "@testing-library/jest-dom"
+    ]
   },
   "include": [
-    "src"
+    "src",
+    "./setupTests.ts"
   ],
   "exclude": [
-    "node_modules",
+    "node_modules"
   ]
 }

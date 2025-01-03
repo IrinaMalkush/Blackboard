@@ -1,29 +1,36 @@
+import { ChangeEvent } from "react";
 import styled from "styled-components";
 
-import { IconButton } from "../../components/IconButton";
-import CircleIcon from "../../static/icons/circle.svg";
-import EraserIcon from "../../static/icons/eraser.svg";
-import PencilIcon from "../../static/icons/pencil.svg";
-import SlashIcon from "../../static/icons/slash.svg";
-import SquareIcon from "../../static/icons/square.svg";
-import TriangleIcon from "../../static/icons/triangle.svg";
-import { Tools } from "../../types/tools";
+import { ColorOfToolType } from "../../types/colors";
+import { ToolsType } from "../../types/tools";
+import { ColorsSection } from "../canvas/ColorsSection";
+import { LineWidthSection } from "../canvas/LineWidthSection";
+import { ToolsSection } from "../canvas/ToolsSection";
 
 interface IHeaderProps {
-  handleClick: (tool: Tools) => void;
+  selectedTool: ToolsType;
+  handleChooseTool: (tool: ToolsType) => void;
+  selectedColor: ColorOfToolType;
+  handleChooseColor: (color: ColorOfToolType) => void;
+  lineWidth: number;
+  handleLineWidthChange: (event: ChangeEvent<HTMLInputElement>) => void;
 }
 
-export const Header = ({ handleClick }: IHeaderProps) => {
+export const Header = ({
+  selectedTool,
+  handleChooseTool,
+  selectedColor,
+  handleChooseColor,
+  lineWidth,
+  handleLineWidthChange,
+}: IHeaderProps) => {
   return (
-    <Container>
-      <Buttons>
-        <IconButton icon={PencilIcon} alt={"pencil"} onClick={() => handleClick("pencil")} />
-        <IconButton icon={SlashIcon} alt={"line"} onClick={() => handleClick("line")} />
-        <IconButton icon={CircleIcon} alt={"circle"} onClick={() => handleClick("circle")} />
-        <IconButton icon={TriangleIcon} alt={"triangle"} onClick={() => handleClick("triangle")} />
-        <IconButton icon={SquareIcon} alt={"rectangle"} onClick={() => handleClick("rectangle")} />
-        <IconButton icon={EraserIcon} alt={"eraser"} onClick={() => handleClick("eraser")} />
-      </Buttons>
+    <Container role="banner">
+      <ToolsSection selectedTool={selectedTool} handleClick={handleChooseTool} />
+      <Parameters>
+        <LineWidthSection lineWidth={lineWidth} handleLineWidthChange={handleLineWidthChange} />
+        <ColorsSection selectedColor={selectedColor} handleClick={handleChooseColor} />
+      </Parameters>
     </Container>
   );
 };
@@ -38,8 +45,9 @@ const Container = styled.div`
   padding: 12px;
 `;
 
-const Buttons = styled.div`
+const Parameters = styled.div`
   display: flex;
   flex-direction: row;
-  gap: 8px;
+  gap: 12px;
+  margin-top: 16px;
 `;
