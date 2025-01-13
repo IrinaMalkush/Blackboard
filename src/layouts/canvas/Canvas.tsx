@@ -1,4 +1,5 @@
-import { usePencilDraw } from "../../hooks/usePencilDraw";
+// import { usePencilDraw } from "../../hooks/usePencilDraw";
+import { useDraw } from "../../hooks/useDraw";
 import { ColorOfToolType } from "../../types/colors";
 import { ToolsType } from "../../types/tools";
 
@@ -9,7 +10,8 @@ interface ICanvasProps {
 }
 
 export const Canvas = ({ selectedTool, selectedColor, lineWidth }: ICanvasProps) => {
-  const { canvasRef } = usePencilDraw(selectedTool, selectedColor, lineWidth);
+  // const { canvasRef } = usePencilDraw(selectedTool, selectedColor, lineWidth);
+  const { canvasRef } = useDraw(selectedTool, selectedColor, lineWidth);
 
   return (
     <div>
