@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { ignoreKeys } from "../constants/ignoreKeys";
 import { ColorOfToolType } from "../types/colors";
@@ -11,31 +11,21 @@ export type CoordinatesType = { x: number; y: number };
 let shapeIdCounter = 1;
 let textIdCounter = 1;
 
-// Дополнительно можно определить «контстанты» для шагов курсора и т.п.
-// Но пока оставим в коде, как есть.
-
 export const useDraw = (
   selectedTool: ToolsType,
   selectedColor: ColorOfToolType,
   lineWidth: number,
+  imageForInsert: HTMLImageElement | null,
+  setImageForInsert: React.Dispatch<React.SetStateAction<HTMLImageElement | null>>,
 ) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  // Состояния для рисования
   const [isPainting, setIsPainting] = useState(false);
   const [mouseDownPosition, setMouseDownPosition] = useState<CoordinatesType | null>(null);
-
-  // Текущая фигура: либо { x1,y1,x2,y2 }, либо { path: [...] }
   const [currentShape, setCurrentShape] = useState<DrawnShape | null>(null);
-
-  // Массив «зафиксированных» фигур
   const [shapes, setShapes] = useState<DrawnShape[]>([]);
-
-  // Для текста
   const [textPosition, setTextPosition] = useState<CoordinatesType | null>(null);
   const [texts, setTexts] = useState<DrawnText[]>([]);
 
-  // Состояние «перетаскивания» или «вращения»
   const [draggingItem, setDraggingItem] = useState<{
     type: "shape" | "text";
     id: number;
@@ -46,29 +36,22 @@ export const useDraw = (
     initialMouseAngle?: number;
   } | null>(null);
 
-  /**
-   * Перерисовать холст
-   */
   const redrawCanvas = useCallback(() => {
     if (!canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Очищаем холст
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Сначала рисуем зафиксированные фигуры
     shapes.forEach((shape) => {
       drawShape(ctx, shape);
     });
 
-    // Если есть «текущая» (ещё не зафиксированная) фигура — нарисуем
     if (currentShape) {
       drawShape(ctx, currentShape);
     }
 
-    // Теперь рисуем тексты
     texts.forEach((txt) => {
       drawText(ctx, txt);
     });
@@ -79,6 +62,41 @@ export const useDraw = (
    */
   function drawShape(ctx: CanvasRenderingContext2D, shape: DrawnShape) {
     const { tool, angle = 0, selected, color, lineWidth } = shape;
+    if (shape.tool === "image" && shape.img) {
+      ctx.save();
+      const { x1, y1, x2, y2, angle = 0 } = shape;
+
+      if (x1 != null && x2 != null && y1 != null && y2 != null) {
+        const centerX = (x1 + x2) / 2;
+        const centerY = (y1 + y2) / 2;
+        ctx.translate(centerX, centerY);
+        ctx.rotate((angle * Math.PI) / 180);
+        ctx.translate(-centerX, -centerY);
+
+        const width = x2 - x1;
+        const height = y2 - y1;
+        ctx.drawImage(shape.img, x1, y1, width, height);
+
+        // Если selected, рисуем bounding box и handle
+        if (shape.selected) {
+          ctx.save();
+          ctx.strokeStyle = "blue";
+          ctx.setLineDash([5, 3]);
+          ctx.strokeRect(x1, y1, width, height);
+
+          // handle
+          const handleSize = 10;
+          const hx = x1 + width - handleSize;
+          const hy = y1;
+          ctx.setLineDash([]);
+          ctx.strokeRect(hx, hy, handleSize, handleSize);
+          ctx.restore();
+        }
+      }
+
+      ctx.restore();
+      return;
+    }
 
     // 1) Если это pencil/eraser, рисуем path
     if ((tool === "pencil" || tool === "eraser") && shape.path) {
@@ -86,7 +104,6 @@ export const useDraw = (
       ctx.lineWidth = lineWidth;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      // для ластика используем белый
       ctx.strokeStyle = tool === "eraser" ? "#f9f8f8" : color;
 
       const points = shape.path;
@@ -194,57 +211,71 @@ export const useDraw = (
    * Отрисовать надпись (с учётом переноса строки)
    */
   function drawText(ctx: CanvasRenderingContext2D, txt: DrawnText) {
+    const angle = txt.angle ?? 0;
+    const angleRad = (angle * Math.PI) / 180;
+
     ctx.save();
     ctx.font = `${txt.fontSize}px sans-serif`;
     ctx.fillStyle = txt.color;
 
     const lines = txt.text.split("\n");
     const lineHeight = txt.fontSize * 1.2;
+    let maxWidth = 0;
+    for (const line of lines) {
+      const w = ctx.measureText(line).width;
+      if (w > maxWidth) {
+        maxWidth = w;
+      }
+    }
+    const totalHeight = lines.length * lineHeight;
 
+    // Центр для вращения
+    const centerX = txt.x + maxWidth / 2;
+    const centerY = txt.y - txt.fontSize + totalHeight / 2;
+
+    // Поворачиваем контекст
+    ctx.translate(centerX, centerY);
+    ctx.rotate(angleRad);
+    ctx.translate(-centerX, -centerY);
+
+    // Рисуем строки текста
     lines.forEach((line, index) => {
-      const yOffset = txt.y + index * lineHeight;
-      ctx.fillText(line, txt.x, yOffset);
+      const lineY = txt.y + index * lineHeight;
+      ctx.fillText(line, txt.x, lineY);
     });
 
-    // Если выделено — отрисуем bounding box
+    // Если выделено — bounding box + handle
     if (txt.selected) {
       ctx.setLineDash([5, 3]);
       ctx.strokeStyle = "blue";
-
-      const totalHeight = lines.length * lineHeight;
-      let maxWidth = 0;
-      for (const line of lines) {
-        const w = ctx.measureText(line).width;
-        if (w > maxWidth) {
-          maxWidth = w;
-        }
-      }
       const margin = 6;
-      ctx.strokeRect(
-        txt.x - margin,
-        txt.y - txt.fontSize - margin,
-        maxWidth + margin * 2,
-        totalHeight + margin * 2 - (lineHeight - txt.fontSize),
-      );
 
-      // Рисуем упрощённый «курсор», если у данного txt есть cursorIndex
-      if (typeof txt.cursorIndex === "number") {
-        // Считаем, в какой строке находится курсор
-        // и где примерно по горизонтали
-        const { cursorLine, cursorX } = measureCursorPos(ctx, txt, txt.cursorIndex);
-        // x, y для курсора
-        const cx = txt.x + cursorX;
-        const cy = txt.y + cursorLine * lineHeight;
+      const left = txt.x - margin;
+      const top = txt.y - txt.fontSize - margin;
+      const width = maxWidth + margin * 2;
+      const height = totalHeight + margin * 2 - (lineHeight - txt.fontSize);
+      ctx.strokeRect(left, top, width, height);
 
-        ctx.beginPath();
-        // Высота курсора примем = fontSize
-        ctx.moveTo(cx, cy - txt.fontSize);
-        ctx.lineTo(cx, cy - txt.fontSize + lineHeight);
-        ctx.strokeStyle = "red";
-        ctx.setLineDash([]);
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      }
+      // Handle
+      const handleSize = 10;
+      const hx = left + width - handleSize;
+      const hy = top;
+      ctx.setLineDash([]);
+      ctx.strokeRect(hx, hy, handleSize, handleSize);
+    }
+
+    if (txt.selected && typeof txt.cursorIndex === "number") {
+      const { cursorLine, cursorX } = measureCursorPos(ctx, txt, txt.cursorIndex);
+      const cx = txt.x + cursorX;
+      const cy = txt.y + cursorLine * lineHeight;
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - txt.fontSize);
+      ctx.lineTo(cx, cy - txt.fontSize + lineHeight);
+      ctx.strokeStyle = "red";
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1;
+      ctx.stroke();
     }
 
     ctx.restore();
@@ -260,55 +291,39 @@ export const useDraw = (
     cursorIndex: number,
   ): { cursorLine: number; cursorX: number } {
     const lines = txt.text.split("\n");
-    // Пробегаем по строкам, вычитая длину каждой строки,
-    // пока не «упрёмся» в нужный индекс
+
     let remaining = cursorIndex;
     let lineIdx = 0;
     let cursorX = 0;
 
     for (let i = 0; i < lines.length; i++) {
-      // Если курсор внутри этой строки
       if (remaining <= lines[i].length) {
-        // длина строки = lines[i].length
-        // считаем ширину [0..remaining-1] символов
         const partialText = lines[i].slice(0, remaining);
         cursorX = ctx.measureText(partialText).width;
         lineIdx = i;
         break;
       } else {
-        // курсор ещё не в этой строке
         remaining -= lines[i].length;
-        // Но если cursorIndex «упал» ровно на конец строки,
-        // значит мы находимся «между» этой и следующей (если есть \n).
-        // Вычитаем +1 если не последняя строка?
-        // Однако т.к. cursorIndex хранит абсолютную позицию
-        // (включая \n как 1 символ), нужно учесть +1.
         remaining -= 1; // для \n
         if (remaining < 0) {
           remaining = 0;
         }
-      }
-      // если в самом конце мы вышли за все строки, cursorIndex равен длине всего текста
-      // тогда курсор идёт в конец последней строки
-      if (i === lines.length - 1) {
-        // значит курсор после последней строки
-        const partialText = lines[i];
-        cursorX = ctx.measureText(partialText).width;
-        lineIdx = i;
+        if (i === lines.length - 1) {
+          // курсор после последней строки
+          const partialText = lines[i];
+          cursorX = ctx.measureText(partialText).width;
+          lineIdx = i;
+        }
       }
     }
 
     return { cursorLine: lineIdx, cursorX };
   }
 
-  // При любом изменении перерисовываем
   useEffect(() => {
     redrawCanvas();
   }, [shapes, currentShape, texts, redrawCanvas]);
 
-  /**
-   * startPaint (mousedown)
-   */
   const startPaint = useCallback(
     (event: MouseEvent) => {
       if (!canvasRef.current) return;
@@ -323,7 +338,7 @@ export const useDraw = (
       let offsetY = 0;
       let rotateHandle = false;
 
-      // Сначала ищем фигуры
+      // 1) Сначала ищем фигуры
       for (let i = shapes.length - 1; i >= 0; i--) {
         const shp = shapes[i];
         if (shp.path) {
@@ -355,6 +370,7 @@ export const useDraw = (
           const bottom = Math.max(shp.y1 ?? 0, shp.y2 ?? 0);
 
           if (shp.selected) {
+            // handle 10x10 в правом верхнем углу
             const handleSize = 10;
             const hx1 = right - handleSize;
             const hy1 = top;
@@ -387,14 +403,14 @@ export const useDraw = (
       }
 
       if (foundShape) {
-        // Выделяем фигуру
         setShapes((prev) => prev.map((s) => ({ ...s, selected: s.id === foundShape!.id })));
-        // Снимаем выделение с текста
+        // сброс выделения текста
         setTexts((prev) => prev.map((t) => ({ ...t, selected: false, cursorIndex: undefined })));
 
         if (rotateHandle) {
-          const cx = ((foundShape.x1 ?? 0) + (foundShape.x2 ?? 0)) / 2 || 0;
-          const cy = ((foundShape.y1 ?? 0) + (foundShape.y2 ?? 0)) / 2 || 0;
+          // вращаем фигуру
+          const cx = ((foundShape.x1 ?? 0) + (foundShape.x2 ?? 0)) / 2;
+          const cy = ((foundShape.y1 ?? 0) + (foundShape.y2 ?? 0)) / 2;
           const dx = coordinates.x - cx;
           const dy = coordinates.y - cy;
           const initialMouseAngle = Math.atan2(dy, dx);
@@ -410,26 +426,25 @@ export const useDraw = (
           canvas.style.cursor = "grabbing";
           return;
         } else {
+          // перетаскивание
           setDraggingItem({
             type: "shape",
             id: foundShape.id,
             offsetX,
             offsetY,
           });
-          canvas.style.cursor = "grabbing";
+          canvas.style.cursor = "move";
           return;
         }
       }
 
-      // Ищем текст
+      // 2) Если не нашли фигуру, ищем текст
       const ctx = canvas.getContext("2d");
       if (ctx) {
         let foundText: DrawnText | null = null;
         for (let i = texts.length - 1; i >= 0; i--) {
           const txt = texts[i];
           ctx.font = `${txt.fontSize}px sans-serif`;
-
-          // Многострочный текст: нам нужно понять bounding box
           const lines = txt.text.split("\n");
           const lineHeight = txt.fontSize * 1.2;
           let maxWidth = 0;
@@ -438,12 +453,34 @@ export const useDraw = (
             if (w > maxWidth) maxWidth = w;
           }
           const totalHeight = lines.length * lineHeight;
+          const margin = 6;
+          const left = txt.x - margin;
+          const top = txt.y - txt.fontSize - margin;
+          const width = maxWidth + margin * 2;
+          const height = totalHeight + margin * 2 - (lineHeight - txt.fontSize);
+          const right = left + width;
+          const bottom = top + height;
 
-          const left = txt.x;
-          const top = txt.y - txt.fontSize;
-          const right = txt.x + maxWidth;
-          const bottom = top + totalHeight;
+          // Проверяем handle (10x10) в правом верхнем углу
+          if (txt.selected) {
+            const handleSize = 10;
+            const hx1 = right - handleSize;
+            const hy1 = top;
+            const hx2 = right;
+            const hy2 = top + handleSize;
+            if (
+              coordinates.x >= hx1 &&
+              coordinates.x <= hx2 &&
+              coordinates.y >= hy1 &&
+              coordinates.y <= hy2
+            ) {
+              foundText = txt;
+              rotateHandle = true;
+              break;
+            }
+          }
 
+          // Проверяем сам box
           if (
             coordinates.x >= left &&
             coordinates.x <= right &&
@@ -458,81 +495,123 @@ export const useDraw = (
         }
 
         if (foundText) {
-          setTexts((prev) =>
-            prev.map((t) => {
-              if (t.id === foundText!.id) {
-                // Выделяем этот текст
-                return {
-                  ...t,
-                  selected: true,
-                  // cursorIndex: 0 // пока что (установим правильный индекс чуть ниже)
-                };
-              }
-              return { ...t, selected: false, cursorIndex: undefined };
-            }),
-          );
-          setShapes((prev) => prev.map((s) => ({ ...s, selected: false })));
-
-          // Определяем точный cursorIndex (где кликнули)
-          // Для упрощения: «перебираем» каждый символ, считаем его ширину, смотрим куда пришёл x/y.
-          const clickedText = foundText!;
-          // Превращаем в одну строку? Или обходим посимвольно построчно.
-          // Пример базовой реализации (более точно — нужно смотреть line + символ).
           let newCursorIndex = 0;
-          const lines = clickedText.text.split("\n");
-          const lineHeight = clickedText.fontSize * 1.2;
+          {
+            // Разбиваем текст на строки
+            const lines = foundText.text.split("\n");
+            const lineHeight = foundText.fontSize * 1.2;
 
-          let totalSoFar = 0;
-          for (let li = 0; li < lines.length; li++) {
-            // Верхняя граница строки
-            const lineTop = clickedText.y - clickedText.fontSize + li * lineHeight;
-            const lineBottom = lineTop + lineHeight;
+            // Считаем, какую строку кликнули по Y
+            let totalSoFar = 0; // это будет «суммарный индекс» с учётом предыдущих строк
+            let clickedLineIndex = -1;
+            for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+              const lineTop = foundText.y + lineIdx * lineHeight - foundText.fontSize;
+              const lineBottom = lineTop + lineHeight;
+              if (coordinates.y >= lineTop && coordinates.y <= lineBottom) {
+                clickedLineIndex = lineIdx;
+                break;
+              }
+              // если не попали в эту строку, добавим (lines[lineIdx].length + 1) к totalSoFar
+              totalSoFar += lines[lineIdx].length + 1; // +1 за символ \n
+            }
 
-            // Если клик попал в строку li
-            if (coordinates.y >= lineTop && coordinates.y <= lineBottom) {
-              // Идём посимвольно
-              let foundPos = lines[li].length; // считаем, что курсор в самом конце
-              for (let c = 0; c < lines[li].length; c++) {
-                const part = lines[li].slice(0, c);
+            // Если мы вообще не попали ни в одну строку (клик выше/ниже),
+            // можно поставить курсор в начало/конец текста. Или игнорировать.
+            if (clickedLineIndex < 0) {
+              // Пусть будет в конец:
+              newCursorIndex = foundText.text.length;
+            } else {
+              // Кликнули в строку clickedLineIndex
+              // Идём посимвольно по lines[clickedLineIndex], чтобы понять,
+              // между какими символами остановиться
+              const lineText = lines[clickedLineIndex];
+              let cIndex = 0; // индекс символа внутри строки
+              // «Левая граница» строки — это foundText.x
+              // Учитываем, что (lineTop) ~ foundText.y + lineIdx * lineHeight - foundText.fontSize
+              // Но по X нам достаточно смотреть (coordinates.x - foundText.x)
+
+              for (let c = 0; c < lineText.length; c++) {
+                const part = lineText.slice(0, c);
                 const w = ctx.measureText(part).width;
-                // x координата символа c ~ txt.x + w
-                if (coordinates.x < clickedText.x + w) {
-                  foundPos = c;
+                // если клик левее "c"-го символа, останавливаемся
+                if (coordinates.x < foundText.x + w) {
+                  cIndex = c;
                   break;
                 }
+                // если дошли до конца
+                if (c === lineText.length - 1) {
+                  cIndex = lineText.length;
+                }
               }
-              newCursorIndex = totalSoFar + foundPos;
-              break;
-            } else {
-              // Переходим к следующей строке
-              totalSoFar += lines[li].length + 1; // +1 за символ \n
+
+              // теперь полный индекс = totalSoFar + cIndex
+              newCursorIndex = totalSoFar + cIndex;
             }
           }
 
+          // Теперь меняем состояние
           setTexts((prev) =>
             prev.map((t) =>
               t.id === foundText!.id
                 ? {
                     ...t,
                     selected: true,
-                    cursorIndex: newCursorIndex,
+                    cursorIndex: newCursorIndex, // <-- ключевой момент
                   }
-                : t,
+                : {
+                    ...t,
+                    selected: false,
+                    cursorIndex: undefined,
+                  },
             ),
           );
+          setShapes((prev) => prev.map((s) => ({ ...s, selected: false })));
+          if (rotateHandle) {
+            // вращаем текст
+            const angle0 = foundText.angle ?? 0;
+            // Центр текста (упрощённо считаем)
+            ctx.font = `${foundText.fontSize}px sans-serif`;
+            const lines = foundText.text.split("\n");
+            let maxWidth = 0;
+            lines.forEach((l) => {
+              const w = ctx.measureText(l).width;
+              if (w > maxWidth) maxWidth = w;
+            });
+            const totalHeight = lines.length * foundText.fontSize * 1.2;
 
-          setDraggingItem({
-            type: "text",
-            id: foundText.id,
-            offsetX,
-            offsetY,
-          });
-          canvas.style.cursor = "grabbing";
-          return;
+            // Центр (приблизительно)
+            const cx = foundText.x + maxWidth / 2;
+            const cy = foundText.y - foundText.fontSize + totalHeight / 2;
+
+            const dx = coordinates.x - cx;
+            const dy = coordinates.y - cy;
+            const initialMouseAngle = Math.atan2(dy, dx);
+            setDraggingItem({
+              type: "text",
+              id: foundText.id,
+              offsetX: 0,
+              offsetY: 0,
+              rotate: true,
+              initialAngle: angle0,
+              initialMouseAngle,
+            });
+            canvas.style.cursor = "grabbing";
+            return;
+          } else {
+            // перетаскивание
+            setDraggingItem({
+              type: "text",
+              id: foundText.id,
+              offsetX,
+              offsetY,
+            });
+            canvas.style.cursor = "move";
+            return;
+          }
         }
       }
 
-      // Если инструмент = "text", начинаем ввод нового текста
+      // 3) Если инструмент = "text" и не нашли существующий
       if (selectedTool === "text") {
         setDraggingItem(null);
         setShapes((prev) => prev.map((s) => ({ ...s, selected: false })));
@@ -541,7 +620,27 @@ export const useDraw = (
         return;
       }
 
-      // Иначе рисование фигуры
+      if (selectedTool === "image" && imageForInsert) {
+        const newId = shapeIdCounter++;
+        const newShape: DrawnShape = {
+          id: newId,
+          tool: "image",
+          img: imageForInsert,
+          x1: coordinates.x,
+          y1: coordinates.y,
+          x2: coordinates.x + 100,
+          y2: coordinates.y + 100,
+          angle: 0,
+          selected: true,
+          color: "#000", // не используется
+          lineWidth: 1,
+        };
+        setShapes((prev) => [...prev, newShape]);
+        setImageForInsert(null);
+        return;
+      }
+
+      // Иначе рисуем фигуру
       if (selectedTool === "pencil" || selectedTool === "eraser") {
         setIsPainting(true);
         const newId = shapeIdCounter++;
@@ -557,7 +656,7 @@ export const useDraw = (
         return;
       }
 
-      // Иначе line / rectangle / circle / triangle
+      // line / rectangle / circle / triangle
       setIsPainting(true);
       setMouseDownPosition(coordinates);
       setShapes((prev) => prev.map((s) => ({ ...s, selected: false })));
@@ -576,7 +675,7 @@ export const useDraw = (
       };
       setCurrentShape(newShape);
     },
-    [selectedTool, shapes, texts, selectedColor, lineWidth],
+    [selectedTool, imageForInsert, selectedColor, lineWidth, shapes, texts],
   );
 
   /**
@@ -591,21 +690,9 @@ export const useDraw = (
       const canvas = canvasRef.current;
       canvas.style.cursor = "default";
 
-      const activeShape = shapes.find((s) => s.selected);
-      if (activeShape && !activeShape.path) {
-        const right = Math.max(activeShape.x1 ?? 0, activeShape.x2 ?? 0);
-        const top = Math.min(activeShape.y1 ?? 0, activeShape.y2 ?? 0);
-        if (
-          coordinates.x >= right - 10 &&
-          coordinates.x <= right &&
-          coordinates.y >= top &&
-          coordinates.y <= top + 10
-        ) {
-          canvas.style.cursor = "grab";
-        }
-      }
-
+      // Если перетаскиваем или вращаем
       if (draggingItem) {
+        // 1) Фигуры
         if (draggingItem.type === "shape") {
           if (draggingItem.rotate) {
             const shp = shapes.find((s) => s.id === draggingItem.id);
@@ -621,7 +708,7 @@ export const useDraw = (
             canvas.style.cursor = "grabbing";
             return;
           } else {
-            // простое перетаскивание
+            // перетаскивание
             setShapes((prev) =>
               prev.map((s) => {
                 if (s.id === draggingItem.id) {
@@ -652,26 +739,60 @@ export const useDraw = (
                 return s;
               }),
             );
-            canvas.style.cursor = "grabbing";
+            canvas.style.cursor = "move";
             return;
           }
-        } else if (draggingItem.type === "text") {
-          // перемещаем текст
-          setTexts((prev) =>
-            prev.map((t) => {
-              if (t.id === draggingItem.id) {
-                const x = coordinates.x - draggingItem.offsetX;
-                const y = coordinates.y - draggingItem.offsetY;
-                return { ...t, x, y };
-              }
-              return t;
-            }),
-          );
-          canvas.style.cursor = "grabbing";
-          return;
+        }
+
+        // 2) Текст (NEW: поддержка rotate)
+        else if (draggingItem.type === "text") {
+          if (draggingItem.rotate) {
+            const txt = texts.find((t) => t.id === draggingItem.id);
+            if (!txt) return;
+            // Снова ищем центр
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+
+            ctx.font = `${txt.fontSize}px sans-serif`;
+            const lines = txt.text.split("\n");
+            let maxWidth = 0;
+
+            lines.forEach((l) => {
+              const w = ctx.measureText(l).width;
+              if (w > maxWidth) maxWidth = w;
+            });
+            const totalHeight = lines.length * txt.fontSize * 1.2;
+
+            const cx = txt.x + maxWidth / 2;
+            const cy = txt.y - txt.fontSize + totalHeight / 2;
+            const dx = coordinates.x - cx;
+            const dy = coordinates.y - cy;
+            const currentAngle = Math.atan2(dy, dx);
+            const delta = currentAngle - (draggingItem.initialMouseAngle ?? 0);
+            const newAngle = (draggingItem.initialAngle ?? 0) + (delta * 180) / Math.PI;
+
+            setTexts((prev) => prev.map((t) => (t.id === txt.id ? { ...t, angle: newAngle } : t)));
+            canvas.style.cursor = "grabbing";
+            return;
+          } else {
+            // перетаскиваем текст
+            setTexts((prev) =>
+              prev.map((t) => {
+                if (t.id === draggingItem.id) {
+                  const x = coordinates.x - draggingItem.offsetX;
+                  const y = coordinates.y - draggingItem.offsetY;
+                  return { ...t, x, y };
+                }
+                return t;
+              }),
+            );
+            canvas.style.cursor = "move";
+            return;
+          }
         }
       }
 
+      // Если рисуем pencil/eraser
       if (
         isPainting &&
         currentShape &&
@@ -683,6 +804,7 @@ export const useDraw = (
         return;
       }
 
+      // Иначе line/rectangle/circle/triangle
       if (isPainting && currentShape && mouseDownPosition) {
         setCurrentShape({
           ...currentShape,
@@ -691,7 +813,7 @@ export const useDraw = (
         });
       }
     },
-    [draggingItem, shapes, currentShape, isPainting, mouseDownPosition],
+    [draggingItem, shapes, texts, currentShape, isPainting, mouseDownPosition],
   );
 
   /**
@@ -733,7 +855,6 @@ export const useDraw = (
    */
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Поворот по R (15 градусов)
       if (event.key === "r" || event.key === "R") {
         setShapes((prev) =>
           prev.map((sh) => (sh.selected ? { ...sh, angle: (sh.angle ?? 0) + 15 } : sh)),
@@ -745,11 +866,8 @@ export const useDraw = (
       const activeText = texts.find((t) => t.selected);
       if (activeText) {
         if (ignoreKeys.includes(event.key)) return;
-
-        // Если нет cursorIndex — установим в конец
         const cursorIndex = activeText.cursorIndex ?? activeText.text.length;
 
-        // Стрелки влево/вправо
         if (event.key === "ArrowLeft") {
           if (cursorIndex > 0) {
             setTexts((prev) =>
@@ -771,18 +889,14 @@ export const useDraw = (
           return;
         }
 
-        // Перенос строки
+        // Enter -> перенос строки
         if (event.key === "Enter") {
           const newText =
             activeText.text.slice(0, cursorIndex) + "\n" + activeText.text.slice(cursorIndex);
           setTexts((prev) =>
             prev.map((txt) =>
               txt.id === activeText.id
-                ? {
-                    ...txt,
-                    text: newText,
-                    cursorIndex: cursorIndex + 1,
-                  }
+                ? { ...txt, text: newText, cursorIndex: cursorIndex + 1 }
                 : txt,
             ),
           );
@@ -792,7 +906,6 @@ export const useDraw = (
         // Backspace
         if (event.key === "Backspace") {
           if (cursorIndex > 0) {
-            // Удаляем символ слева от cursorIndex
             const newText =
               activeText.text.slice(0, cursorIndex - 1) + activeText.text.slice(cursorIndex);
             setTexts((prev) =>
@@ -810,34 +923,33 @@ export const useDraw = (
           return;
         }
 
-        // Добавляем обычный символ
+        // Пример: если нажата обычная буква
         if (event.key.length === 1) {
-          const newText =
-            activeText.text.slice(0, cursorIndex) + event.key + activeText.text.slice(cursorIndex);
           setTexts((prev) =>
-            prev.map((txt) =>
-              txt.id === activeText.id
-                ? {
-                    ...txt,
-                    text: newText,
-                    cursorIndex: cursorIndex + 1,
-                  }
-                : txt,
-            ),
+            prev.map((txt) => {
+              if (txt.id === activeText.id) {
+                // Собираем новый текст
+                const newText =
+                  txt.text.slice(0, cursorIndex) + event.key + txt.text.slice(cursorIndex);
+                return {
+                  ...txt,
+                  text: newText,
+                  cursorIndex: cursorIndex + 1,
+                };
+              }
+              return txt;
+            }),
           );
         }
         return;
       }
 
-      // Если текст не выделен, но есть textPosition — создаём новый при вводе
+      // Если текст не выделен, но есть textPosition — создаём новый
       if (textPosition) {
         if (ignoreKeys.includes(event.key)) return;
         if (!canvasRef.current) return;
 
-        if (event.key === "Enter") {
-          // Игнорируем или можно создать текст с одним \n
-          return;
-        }
+        if (event.key === "Enter") return;
 
         if (event.key.length === 1) {
           const newId = textIdCounter++;
@@ -851,12 +963,14 @@ export const useDraw = (
               color: selectedColor,
               fontSize: 16,
               selected: true,
-              cursorIndex: 1, // т.к. добавили первый символ
+              cursorIndex: 1,
+              // NEW: добавим angle = 0
+              angle: 0,
             },
           ]);
           setTextPosition(null);
         } else if (event.key === "Backspace") {
-          // Игнорируем
+          // игнор
         }
       }
     };
@@ -867,9 +981,29 @@ export const useDraw = (
     };
   }, [selectedTool, textPosition, texts, selectedColor]);
 
+  /**
+   * Сохранить текущее содержимое canvas в файл PNG
+   */
+  const saveCanvas = useCallback(() => {
+    if (!canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const dataURL = canvas.toDataURL("image/png");
+
+    // Создаем временную ссылку и кликаем по ней, чтобы скачать
+    const link = document.createElement("a");
+    link.href = dataURL;
+    link.download = "myDrawing.png"; // любое имя файла
+    link.click();
+
+    // Альтернативно, можно добавить link в документ,
+    // затем вызвать link.click() и удалить link
+  }, []);
+
   return {
     canvasRef,
     shapes,
     texts,
+    saveCanvas,
   };
 };

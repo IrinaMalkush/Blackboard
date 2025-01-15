@@ -3,7 +3,7 @@ import "@testing-library/jest-dom";
 import { fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 
-import { IconButton } from "../components/IconButton";
+import { IconButton } from "../components/ui/IconButton";
 
 describe("IconButton", () => {
   it("renders the icon with the correct alt text", () => {

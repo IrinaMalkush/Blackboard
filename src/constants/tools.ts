@@ -1,6 +1,7 @@
 import CircleIcon from "../static/icons/circle.svg";
 import EraserIcon from "../static/icons/eraser.svg";
 import PencilIcon from "../static/icons/pencil.svg";
+import ImageIcon from "../static/icons/picture.svg";
 import SlashIcon from "../static/icons/slash.svg";
 import SquareIcon from "../static/icons/square.svg";
 import TextIcon from "../static/icons/text.svg";
@@ -15,4 +16,5 @@ export const tools: { name: ToolsType; icon: string }[] = [
   { name: "triangle", icon: TriangleIcon },
   { name: "rectangle", icon: SquareIcon },
   { name: "text", icon: TextIcon },
+  { name: "image", icon: ImageIcon },
 ];

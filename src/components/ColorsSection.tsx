@@ -1,8 +1,8 @@
 import styled from "styled-components";
 
-import { ColorButton } from "../../components/ColorButton";
-import { colorOfTool } from "../../constants/colors";
-import { ColorOfToolType } from "../../types/colors";
+import { colorOfTool } from "../constants/colors";
+import { ColorOfToolType } from "../types/colors";
+import { ColorButton } from "./ui/ColorButton";
 
 interface IColorsSection {
   selectedColor: ColorOfToolType;

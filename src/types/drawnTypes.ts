@@ -3,6 +3,7 @@ import { ToolsType } from "./tools";
 export interface DrawnShape {
   id: number;
   tool: ToolsType;
+  img?: HTMLImageElement; // Сам загруженный объект
   x1?: number;
   y1?: number;
   x2?: number;
@@ -24,4 +25,5 @@ export interface DrawnText {
   fontSize: number;
   selected: boolean;
   cursorIndex?: number;
+  angle?: number; // в градусах
 }
