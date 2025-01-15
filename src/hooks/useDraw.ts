@@ -1,3 +1,4 @@
+import { jsPDF } from "jspdf";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { ignoreKeys } from "../constants/ignoreKeys";
@@ -981,29 +982,45 @@ export const useDraw = (
     };
   }, [selectedTool, textPosition, texts, selectedColor]);
 
-  /**
-   * Сохранить текущее содержимое canvas в файл PNG
-   */
-  const saveCanvas = useCallback(() => {
+  const saveCanvasAsPNG = useCallback(() => {
     if (!canvasRef.current) return;
 
     const canvas = canvasRef.current;
     const dataURL = canvas.toDataURL("image/png");
-
-    // Создаем временную ссылку и кликаем по ней, чтобы скачать
     const link = document.createElement("a");
     link.href = dataURL;
     link.download = "myDrawing.png"; // любое имя файла
     link.click();
+  }, []);
 
-    // Альтернативно, можно добавить link в документ,
-    // затем вызвать link.click() и удалить link
+  const saveCanvasAsPDF = useCallback(() => {
+    if (!canvasRef.current) return;
+    const canvas = canvasRef.current;
+
+    //    -- предполагается, что вы где-то явно установили canvas.width/canvas.height,
+    //       а не только style="width: ...; height: ..."
+    const widthPx = canvas.width;
+    const heightPx = canvas.height;
+    const pxToPt = 72 / 96;
+    const widthPt = widthPx * pxToPt;
+    const heightPt = heightPx * pxToPt;
+    const dataURL = canvas.toDataURL("image/png");
+
+    const pdf = new jsPDF({
+      orientation: widthPt > heightPt ? "landscape" : "portrait",
+      unit: "pt",
+      format: [widthPt, heightPt],
+    });
+
+    pdf.addImage(dataURL, "PNG", 0, 0, widthPt, heightPt);
+    pdf.save("myDrawing.pdf");
   }, []);
 
   return {
     canvasRef,
     shapes,
     texts,
-    saveCanvas,
+    saveCanvasAsPNG,
+    saveCanvasAsPDF,
   };
 };

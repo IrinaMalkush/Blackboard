@@ -4,6 +4,7 @@ import styled from "styled-components";
 import { ColorsSection } from "../components/ColorsSection";
 import { LineWidthSection } from "../components/LineWidthSection";
 import { ToolsSection } from "../components/ToolsSection";
+import { TextButton } from "../components/ui/TextButton";
 import { useDraw } from "../hooks/useDraw";
 import { ColorOfToolType } from "../types/colors";
 import { ToolsType } from "../types/tools";
@@ -26,6 +27,7 @@ export const Main = () => {
   };
 
   const [imageForInsert, setImageForInsert] = useState<HTMLImageElement | null>(null);
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -36,7 +38,7 @@ export const Main = () => {
     };
   }
 
-  const { canvasRef, saveCanvas } = useDraw(
+  const { canvasRef, saveCanvasAsPNG, saveCanvasAsPDF } = useDraw(
     selectedTool,
     selectedColor,
     lineWidth,
@@ -47,13 +49,18 @@ export const Main = () => {
   return (
     <Layout>
       <Container role="banner">
-        <ToolsSection
-          selectedTool={selectedTool}
-          handleClick={handleChooseTool}
-          handleFileChange={handleFileChange}
-          isFileChosen={imageForInsert !== null}
-        />
-        <button onClick={saveCanvas}>Сохранить как PNG</button>
+        <FirstLine>
+          <ToolsSection
+            selectedTool={selectedTool}
+            handleClick={handleChooseTool}
+            handleFileChange={handleFileChange}
+            isFileChosen={imageForInsert !== null}
+          />
+          <DownloadSection>
+            <TextButton onClick={saveCanvasAsPNG} text={"PNG"} />
+            <TextButton onClick={saveCanvasAsPDF} text={"PDF"} />
+          </DownloadSection>
+        </FirstLine>
         <Parameters>
           <LineWidthSection lineWidth={lineWidth} handleLineWidthChange={handleLineWidthChange} />
           <ColorsSection selectedColor={selectedColor} handleClick={handleChooseColor} />
@@ -88,6 +95,19 @@ const Container = styled.div`
   height: 100px;
   background-color: #efefef;
   padding: 12px;
+`;
+
+const FirstLine = styled.div`
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  margin-right: 38px;
+`;
+
+const DownloadSection = styled.div`
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
 `;
 
 const Parameters = styled.div`
