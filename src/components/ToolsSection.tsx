@@ -65,4 +65,8 @@ const LoadFileButton = styled.button<{ $isActive?: boolean }>`
   background-color: ${(p) => (p.$isActive ? "#dcdcdc" : "#00abb3")};
   border: none;
   border-radius: 6px;
+
+  &:active {
+    background-color: #61d6d0;
+  }
 `;

@@ -8,6 +8,7 @@
   "main": "./public/electron.js",
   "dependencies": {
     "jspdf": "^2.5.2",
+    "pdfjs-dist": "^4.10.38",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "styled-components": "^6.1.13",
@@ -49,26 +50,41 @@
     "fix:lint": "eslint src/**/*.{ts,tsx} --fix",
     "fix:prettier": "prettier --write src/**/*.{json}",
     "fix:prettier:public": "prettier --write public/**/*.{js,ts}",
-    "electron:start": "concurrently -k \"cross-env BROWSER=none npm start\" \"wait-on http://127.0.0.1:3000 && electronmon .\""
+    "electron:start": "concurrently -k \"cross-env BROWSER=none npm start\" \"wait-on http://127.0.0.1:3000 && electronmon .\"",
+    "electron:build": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
   },
   "build": {
     "appId": "com.electron.blackboard",
     "productName": "The blackboard",
+    "directories": {
+      "output": "dist"
+    },
     "files": [
       "build/**/*",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "package.json"
     ],
-    "directories": {
-      "buildResources": "public"
+    "win": {
+      "publisherName": "The-blackboard",
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": "deb"
     },
     "mac": {
       "target": "dmg"
     },
-    "win": {
-      "target": "nsis"
-    },
-    "linux": {
-      "target": "deb"
+    "nsis": {
+      "artifactName": "${productName}-Installer.${ext}",
+      "installerIcon": "build/icon.ico",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
     }
   },
   "eslintConfig": {

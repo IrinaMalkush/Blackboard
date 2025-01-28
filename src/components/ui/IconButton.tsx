@@ -24,6 +24,16 @@ const Button = styled.button<{ $isActive?: boolean }>`
   background-color: ${(p) => (p.$isActive ? "#00abb3" : "#dcdcdc")};
   border: none;
   border-radius: 6px;
+
+  &:hover {
+    background-color: ${(p) => (p.$isActive ? "#00abb3" : "#b8b6b6")};
+    transition: 0.3s ease-in-out;
+  }
+
+  &:active {
+    background-color: #61d6d0;
+    transition: 0.3s ease-in-out;
+  }
 `;
 
 const Icon = styled.img`

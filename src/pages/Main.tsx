@@ -4,7 +4,8 @@ import styled from "styled-components";
 import { ColorsSection } from "../components/ColorsSection";
 import { LineWidthSection } from "../components/LineWidthSection";
 import { ToolsSection } from "../components/ToolsSection";
-import { TextButton } from "../components/ui/TextButton";
+import { DownloadButton } from "../components/ui/DownloadButton";
+import { ImportButton } from "../components/ui/ImportButton";
 import { useDraw } from "../hooks/useDraw";
 import { ColorOfToolType } from "../types/colors";
 import { ToolsType } from "../types/tools";
@@ -38,7 +39,7 @@ export const Main = () => {
     };
   }
 
-  const { canvasRef, saveCanvasAsPNG, saveCanvasAsPDF } = useDraw(
+  const { canvasRef, saveCanvasAsPNG, saveCanvasAsPDF, handleFileUpload } = useDraw(
     selectedTool,
     selectedColor,
     lineWidth,
@@ -57,14 +58,20 @@ export const Main = () => {
             isFileChosen={imageForInsert !== null}
           />
           <DownloadSection>
-            <TextButton onClick={saveCanvasAsPNG} text={"PNG"} />
-            <TextButton onClick={saveCanvasAsPDF} text={"PDF"} />
+            <DownloadButton onClick={saveCanvasAsPNG} text={"сохранить в PNG"} />
+            <DownloadButton onClick={saveCanvasAsPDF} text={"сохранить в PDF"} />
           </DownloadSection>
         </FirstLine>
-        <Parameters>
-          <LineWidthSection lineWidth={lineWidth} handleLineWidthChange={handleLineWidthChange} />
-          <ColorsSection selectedColor={selectedColor} handleClick={handleChooseColor} />
-        </Parameters>
+        <SecondLine>
+          <Parameters>
+            <LineWidthSection lineWidth={lineWidth} handleLineWidthChange={handleLineWidthChange} />
+            <ColorsSection selectedColor={selectedColor} handleClick={handleChooseColor} />
+          </Parameters>
+          <DownloadSection>
+            <ImportButton onClick={() => console.log("png")} text={"импорт PNG"} />
+            <ImportButton onClick={handleFileUpload} text={"импорт PDF"} />
+          </DownloadSection>
+        </SecondLine>
       </Container>
       <div>
         <canvas
@@ -104,6 +111,14 @@ const FirstLine = styled.div`
   margin-right: 38px;
 `;
 
+const SecondLine = styled.div`
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  margin-right: 38px;
+  margin-top: 16px;
+`;
+
 const DownloadSection = styled.div`
   display: flex;
   flex-direction: row;
@@ -114,5 +129,4 @@ const Parameters = styled.div`
   display: flex;
   flex-direction: row;
   gap: 12px;
-  margin-top: 16px;
 `;

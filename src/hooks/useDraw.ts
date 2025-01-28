@@ -1,4 +1,5 @@
 import { jsPDF } from "jspdf";
+import * as pdfjsLib from "pdfjs-dist";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { ignoreKeys } from "../constants/ignoreKeys";
@@ -6,6 +7,8 @@ import { ColorOfToolType } from "../types/colors";
 import { DrawnShape, DrawnText } from "../types/drawnTypes";
 import { ToolsType } from "../types/tools";
 import { getCoordinates } from "../utils/getCoordinates";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 
 export type CoordinatesType = { x: number; y: number };
 
@@ -26,6 +29,8 @@ export const useDraw = (
   const [shapes, setShapes] = useState<DrawnShape[]>([]);
   const [textPosition, setTextPosition] = useState<CoordinatesType | null>(null);
   const [texts, setTexts] = useState<DrawnText[]>([]);
+  const [pdfPages, setPdfPages] = useState<HTMLCanvasElement[]>([]);
+  const [uploadedImage, setUploadedImage] = useState<HTMLImageElement | null>(null);
 
   const [draggingItem, setDraggingItem] = useState<{
     type: "shape" | "text";
@@ -37,6 +42,34 @@ export const useDraw = (
     initialMouseAngle?: number;
   } | null>(null);
 
+  const handleFileUpload = async (file: File) => {
+    const fileType = file.type;
+
+    if (fileType === "application/pdf") {
+      const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+      const pages = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 1 });
+        const pageCanvas = document.createElement("canvas");
+        const pageCtx = pageCanvas.getContext("2d");
+
+        pageCanvas.width = viewport.width;
+        pageCanvas.height = viewport.height;
+
+        if (pageCtx) {
+          await page.render({ canvasContext: pageCtx, viewport }).promise;
+          pages.push(pageCanvas);
+        }
+      }
+      setPdfPages(pages);
+    } else if (fileType.startsWith("image/")) {
+      const img = new Image();
+      img.onload = () => setUploadedImage(img);
+      img.src = URL.createObjectURL(file);
+    }
+  };
+
   const redrawCanvas = useCallback(() => {
     if (!canvasRef.current) return;
     const canvas = canvasRef.current;
@@ -44,6 +77,16 @@ export const useDraw = (
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (pdfPages.length) {
+      pdfPages.forEach((pageCanvas, index) => {
+        ctx.drawImage(pageCanvas, 0, index * pageCanvas.height);
+      });
+    }
+
+    if (uploadedImage) {
+      ctx.drawImage(uploadedImage, 0, 0, uploadedImage.width, uploadedImage.height);
+    }
 
     shapes.forEach((shape) => {
       drawShape(ctx, shape);
@@ -498,7 +541,6 @@ export const useDraw = (
         if (foundText) {
           let newCursorIndex = 0;
           {
-            // Разбиваем текст на строки
             const lines = foundText.text.split("\n");
             const lineHeight = foundText.fontSize * 1.2;
 
@@ -516,36 +558,24 @@ export const useDraw = (
               totalSoFar += lines[lineIdx].length + 1; // +1 за символ \n
             }
 
-            // Если мы вообще не попали ни в одну строку (клик выше/ниже),
-            // можно поставить курсор в начало/конец текста. Или игнорировать.
             if (clickedLineIndex < 0) {
-              // Пусть будет в конец:
               newCursorIndex = foundText.text.length;
             } else {
-              // Кликнули в строку clickedLineIndex
-              // Идём посимвольно по lines[clickedLineIndex], чтобы понять,
-              // между какими символами остановиться
               const lineText = lines[clickedLineIndex];
               let cIndex = 0; // индекс символа внутри строки
-              // «Левая граница» строки — это foundText.x
-              // Учитываем, что (lineTop) ~ foundText.y + lineIdx * lineHeight - foundText.fontSize
-              // Но по X нам достаточно смотреть (coordinates.x - foundText.x)
 
               for (let c = 0; c < lineText.length; c++) {
                 const part = lineText.slice(0, c);
                 const w = ctx.measureText(part).width;
-                // если клик левее "c"-го символа, останавливаемся
                 if (coordinates.x < foundText.x + w) {
                   cIndex = c;
                   break;
                 }
-                // если дошли до конца
                 if (c === lineText.length - 1) {
                   cIndex = lineText.length;
                 }
               }
 
-              // теперь полный индекс = totalSoFar + cIndex
               newCursorIndex = totalSoFar + cIndex;
             }
           }
@@ -570,7 +600,7 @@ export const useDraw = (
           if (rotateHandle) {
             // вращаем текст
             const angle0 = foundText.angle ?? 0;
-            // Центр текста (упрощённо считаем)
+            // Центр текста
             ctx.font = `${foundText.fontSize}px sans-serif`;
             const lines = foundText.text.split("\n");
             let maxWidth = 0;
@@ -580,7 +610,7 @@ export const useDraw = (
             });
             const totalHeight = lines.length * foundText.fontSize * 1.2;
 
-            // Центр (приблизительно)
+            // Центр
             const cx = foundText.x + maxWidth / 2;
             const cy = foundText.y - foundText.fontSize + totalHeight / 2;
 
@@ -745,7 +775,7 @@ export const useDraw = (
           }
         }
 
-        // 2) Текст (NEW: поддержка rotate)
+        // 2) Текст
         else if (draggingItem.type === "text") {
           if (draggingItem.rotate) {
             const txt = texts.find((t) => t.id === draggingItem.id);
@@ -890,7 +920,6 @@ export const useDraw = (
           return;
         }
 
-        // Enter -> перенос строки
         if (event.key === "Enter") {
           const newText =
             activeText.text.slice(0, cursorIndex) + "\n" + activeText.text.slice(cursorIndex);
@@ -904,7 +933,6 @@ export const useDraw = (
           return;
         }
 
-        // Backspace
         if (event.key === "Backspace") {
           if (cursorIndex > 0) {
             const newText =
@@ -996,9 +1024,6 @@ export const useDraw = (
   const saveCanvasAsPDF = useCallback(() => {
     if (!canvasRef.current) return;
     const canvas = canvasRef.current;
-
-    //    -- предполагается, что вы где-то явно установили canvas.width/canvas.height,
-    //       а не только style="width: ...; height: ..."
     const widthPx = canvas.width;
     const heightPx = canvas.height;
     const pxToPt = 72 / 96;
@@ -1018,6 +1043,7 @@ export const useDraw = (
 
   return {
     canvasRef,
+    handleFileUpload,
     shapes,
     texts,
     saveCanvasAsPNG,
