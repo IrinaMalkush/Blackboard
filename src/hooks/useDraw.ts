@@ -12,6 +12,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 
 export type CoordinatesType = { x: number; y: number };
 
+type DraggingOperation = "move" | "rotate" | "resize";
+
 let shapeIdCounter = 1;
 let textIdCounter = 1;
 
@@ -26,11 +28,12 @@ export const useDraw = (
   const [isPainting, setIsPainting] = useState(false);
   const [mouseDownPosition, setMouseDownPosition] = useState<CoordinatesType | null>(null);
   const [currentShape, setCurrentShape] = useState<DrawnShape | null>(null);
-  const [shapes, setShapes] = useState<DrawnShape[]>([]);
+  const [shapesByPage, setShapesByPage] = useState<DrawnShape[][]>([]);
+  const [textsByPage, setTextsByPage] = useState<DrawnText[][]>([]);
   const [textPosition, setTextPosition] = useState<CoordinatesType | null>(null);
-  const [texts, setTexts] = useState<DrawnText[]>([]);
   const [pdfPages, setPdfPages] = useState<HTMLCanvasElement[]>([]);
   const [uploadedImage, setUploadedImage] = useState<HTMLImageElement | null>(null);
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
 
   const [draggingItem, setDraggingItem] = useState<{
     type: "shape" | "text";
@@ -38,16 +41,35 @@ export const useDraw = (
     offsetX: number;
     offsetY: number;
     rotate?: boolean;
+    operation: DraggingOperation;
     initialAngle?: number;
     initialMouseAngle?: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (pdfPages.length === 0) {
+      const w = window.innerWidth - 150;
+      const h = window.innerHeight - 86;
+      const blankCanvas = document.createElement("canvas");
+      blankCanvas.width = w;
+      blankCanvas.height = h;
+
+      const ctx = blankCanvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#f9f8f8";
+        ctx.fillRect(0, 0, w, h);
+      }
+
+      setPdfPages([blankCanvas]);
+    }
+  }, [pdfPages]);
 
   const handleFileUpload = async (file: File) => {
     const fileType = file.type;
 
     if (fileType === "application/pdf") {
       const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
-      const pages = [];
+      const pages: HTMLCanvasElement[] = [];
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const viewport = page.getViewport({ scale: 1 });
@@ -62,10 +84,36 @@ export const useDraw = (
           pages.push(pageCanvas);
         }
       }
-      setPdfPages(pages);
+      setPdfPages((prev) => [...prev, ...pages]);
+      setShapesByPage((prev) => {
+        const newArr = [...prev];
+        for (let i = 0; i < pages.length; i++) {
+          newArr.push([]); // пустой массив фигур для каждой новой страницы
+        }
+        return newArr;
+      });
+      setTextsByPage((prev) => {
+        const newArr = [...prev];
+        for (let i = 0; i < pages.length; i++) {
+          newArr.push([]); // пустой массив текстов для каждой новой страницы
+        }
+        return newArr;
+      });
     } else if (fileType.startsWith("image/")) {
       const img = new Image();
-      img.onload = () => setUploadedImage(img);
+      img.onload = () => {
+        const pageCanvas = document.createElement("canvas");
+        pageCanvas.width = img.width;
+        pageCanvas.height = img.height;
+
+        const pageCtx = pageCanvas.getContext("2d");
+        if (pageCtx) {
+          pageCtx.drawImage(img, 0, 0, img.width, img.height);
+        }
+        setPdfPages((prev) => [...prev, pageCanvas]);
+        setShapesByPage((prev) => [...prev, []]);
+        setTextsByPage((prev) => [...prev, []]);
+      };
       img.src = URL.createObjectURL(file);
     }
   };
@@ -78,28 +126,48 @@ export const useDraw = (
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (pdfPages.length) {
-      pdfPages.forEach((pageCanvas, index) => {
-        ctx.drawImage(pageCanvas, 0, index * pageCanvas.height);
-      });
+    if (pdfPages.length > 0 && currentPageIndex < pdfPages.length) {
+      const pageCanvas = pdfPages[currentPageIndex];
+      if (pageCanvas) {
+        ctx.drawImage(pageCanvas, 0, 0);
+      }
     }
 
     if (uploadedImage) {
       ctx.drawImage(uploadedImage, 0, 0, uploadedImage.width, uploadedImage.height);
     }
 
-    shapes.forEach((shape) => {
-      drawShape(ctx, shape);
-    });
+    const shapes = shapesByPage[currentPageIndex] || [];
+    shapes.forEach((shape) => drawShape(ctx, shape));
 
     if (currentShape) {
       drawShape(ctx, currentShape);
     }
 
-    texts.forEach((txt) => {
-      drawText(ctx, txt);
-    });
-  }, [shapes, currentShape, texts]);
+    const texts = textsByPage[currentPageIndex] || [];
+    texts.forEach((txt) => drawText(ctx, txt));
+  }, [pdfPages, currentPageIndex, uploadedImage, shapesByPage, currentShape, textsByPage]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const maxW = window.innerWidth - 124;
+    const maxH = window.innerHeight - 110;
+
+    if (pdfPages.length > 0 && pdfPages[currentPageIndex]) {
+      const pageCanvas = pdfPages[currentPageIndex];
+      const finalW = Math.max(pageCanvas.width, maxW);
+      const finalH = Math.max(pageCanvas.height, maxH);
+
+      canvas.width = finalW;
+      canvas.height = finalH;
+    } else {
+      canvas.width = maxW;
+      canvas.height = maxH;
+    }
+    redrawCanvas();
+  }, [pdfPages, currentPageIndex, redrawCanvas]);
 
   /**
    * Отрисовка фигуры
@@ -113,8 +181,9 @@ export const useDraw = (
       if (x1 != null && x2 != null && y1 != null && y2 != null) {
         const centerX = (x1 + x2) / 2;
         const centerY = (y1 + y2) / 2;
+        const angleRad = (angle * Math.PI) / 180;
         ctx.translate(centerX, centerY);
-        ctx.rotate((angle * Math.PI) / 180);
+        ctx.rotate(angleRad);
         ctx.translate(-centerX, -centerY);
 
         const width = x2 - x1;
@@ -130,10 +199,42 @@ export const useDraw = (
 
           // handle
           const handleSize = 10;
-          const hx = x1 + width - handleSize;
-          const hy = y1;
+          const rotateHandlePos = { x: x2 - handleSize, y: y1 };
+          const resizeHandlePos = { x: x2 - handleSize, y: y2 - handleSize };
+
+          // Вращаем позиции ручек
+          const rotatedRotateHandle = rotatePoint(
+            centerX,
+            centerY,
+            rotateHandlePos.x,
+            rotateHandlePos.y,
+            angleRad,
+          );
+          const rotatedResizeHandle = rotatePoint(
+            centerX,
+            centerY,
+            resizeHandlePos.x,
+            resizeHandlePos.y,
+            angleRad,
+          );
+
+          // Рисуем ручку для вращения
           ctx.setLineDash([]);
-          ctx.strokeRect(hx, hy, handleSize, handleSize);
+          ctx.strokeRect(
+            rotatedRotateHandle.x - handleSize / 2,
+            rotatedRotateHandle.y - handleSize / 2,
+            handleSize,
+            handleSize,
+          );
+
+          // Рисуем ручку для изменения размера
+          ctx.strokeRect(
+            rotatedResizeHandle.x - handleSize / 2,
+            rotatedResizeHandle.y - handleSize / 2,
+            handleSize,
+            handleSize,
+          );
+
           ctx.restore();
         }
       }
@@ -288,7 +389,7 @@ export const useDraw = (
       ctx.fillText(line, txt.x, lineY);
     });
 
-    // Если выделено — bounding box + handle
+    // Если выделено — bounding box + ручки
     if (txt.selected) {
       ctx.setLineDash([5, 3]);
       ctx.strokeStyle = "blue";
@@ -300,12 +401,12 @@ export const useDraw = (
       const height = totalHeight + margin * 2 - (lineHeight - txt.fontSize);
       ctx.strokeRect(left, top, width, height);
 
-      // Handle
+      // Ручка для вращения (правый верхний угол)
       const handleSize = 10;
-      const hx = left + width - handleSize;
-      const hy = top;
+      const rotateHx = left + width - handleSize;
+      const rotateHy = top;
       ctx.setLineDash([]);
-      ctx.strokeRect(hx, hy, handleSize, handleSize);
+      ctx.strokeRect(rotateHx, rotateHy, handleSize, handleSize);
     }
 
     if (txt.selected && typeof txt.cursorIndex === "number") {
@@ -323,6 +424,28 @@ export const useDraw = (
     }
 
     ctx.restore();
+  }
+
+  function renderPageToCanvas(pageIndex: number): HTMLCanvasElement {
+    const basePageCanvas = pdfPages[pageIndex];
+    // создаём временный canvas таких же размеров, как basePageCanvas:
+    const offscreen = document.createElement("canvas");
+    offscreen.width = basePageCanvas.width;
+    offscreen.height = basePageCanvas.height;
+
+    const ctx = offscreen.getContext("2d");
+    if (!ctx) return offscreen;
+
+    ctx.drawImage(basePageCanvas, 0, 0);
+    const pageShapes = shapesByPage[pageIndex] || [];
+    pageShapes.forEach((shape) => {
+      drawShape(ctx, shape);
+    });
+    const pageTexts = textsByPage[pageIndex] || [];
+    pageTexts.forEach((txt) => {
+      drawText(ctx, txt);
+    });
+    return offscreen;
   }
 
   /**
@@ -366,7 +489,7 @@ export const useDraw = (
 
   useEffect(() => {
     redrawCanvas();
-  }, [shapes, currentShape, texts, redrawCanvas]);
+  }, [currentShape, redrawCanvas]);
 
   const startPaint = useCallback(
     (event: MouseEvent) => {
@@ -380,12 +503,14 @@ export const useDraw = (
       let foundShape: DrawnShape | null = null;
       let offsetX = 0;
       let offsetY = 0;
-      let rotateHandle = false;
+      let operation: DraggingOperation | null = null;
 
       // 1) Сначала ищем фигуры
-      for (let i = shapes.length - 1; i >= 0; i--) {
-        const shp = shapes[i];
+      const pageShapes = shapesByPage[currentPageIndex] || [];
+      for (let i = pageShapes.length - 1; i >= 0; i--) {
+        const shp = pageShapes[i];
         if (shp.path) {
+          // Проверка для pencil/eraser
           let minX = shp.path[0].x;
           let maxX = shp.path[0].x;
           let minY = shp.path[0].y;
@@ -408,30 +533,49 @@ export const useDraw = (
             break;
           }
         } else {
+          // Проверка для других фигур (line, rectangle и т.д.)
           const left = Math.min(shp.x1 ?? 0, shp.x2 ?? 0);
           const right = Math.max(shp.x1 ?? 0, shp.x2 ?? 0);
           const top = Math.min(shp.y1 ?? 0, shp.y2 ?? 0);
           const bottom = Math.max(shp.y1 ?? 0, shp.y2 ?? 0);
 
           if (shp.selected) {
-            // handle 10x10 в правом верхнем углу
             const handleSize = 10;
-            const hx1 = right - handleSize;
-            const hy1 = top;
-            const hx2 = right;
-            const hy2 = top + handleSize;
+
+            // Проверка ручки для вращения (правый верхний угол)
+            const rotateHx1 = right - handleSize;
+            const rotateHy1 = top;
+            const rotateHx2 = right;
+            const rotateHy2 = top + handleSize;
             if (
-              coordinates.x >= hx1 &&
-              coordinates.x <= hx2 &&
-              coordinates.y >= hy1 &&
-              coordinates.y <= hy2
+              coordinates.x >= rotateHx1 &&
+              coordinates.x <= rotateHx2 &&
+              coordinates.y >= rotateHy1 &&
+              coordinates.y <= rotateHy2
             ) {
               foundShape = shp;
-              rotateHandle = true;
+              operation = "rotate";
+              break;
+            }
+
+            // Проверка ручки для изменения размера (правый нижний угол)
+            const resizeHx1 = right - handleSize;
+            const resizeHy1 = bottom - handleSize;
+            const resizeHx2 = right;
+            const resizeHy2 = bottom;
+            if (
+              coordinates.x >= resizeHx1 &&
+              coordinates.x <= resizeHx2 &&
+              coordinates.y >= resizeHy1 &&
+              coordinates.y <= resizeHy2
+            ) {
+              foundShape = shp;
+              operation = "resize";
               break;
             }
           }
 
+          // Проверка области фигуры
           if (
             coordinates.x >= left &&
             coordinates.x <= right &&
@@ -447,12 +591,32 @@ export const useDraw = (
       }
 
       if (foundShape) {
-        setShapes((prev) => prev.map((s) => ({ ...s, selected: s.id === foundShape!.id })));
-        // сброс выделения текста
-        setTexts((prev) => prev.map((t) => ({ ...t, selected: false, cursorIndex: undefined })));
+        // Установка выделенной фигуры
+        setShapesByPage((prev) => {
+          const newArr = [...prev];
+          const oldPageShapes = [...(newArr[currentPageIndex] || [])];
+          newArr[currentPageIndex] = oldPageShapes.map((s) => ({
+            ...s,
+            selected: s.id === foundShape!.id,
+          }));
+          return newArr;
+        });
 
-        if (rotateHandle) {
-          // вращаем фигуру
+        // Сброс выделения текста
+        setTextsByPage((prev) => {
+          const newArr = [...prev];
+          const pageIndex = currentPageIndex;
+          const oldPageTexts = [...(newArr[pageIndex] || [])];
+          newArr[pageIndex] = oldPageTexts.map((t) => ({
+            ...t,
+            selected: false,
+            cursorIndex: undefined,
+          }));
+          return newArr;
+        });
+
+        if (operation === "rotate") {
+          // Начало вращения фигуры
           const cx = ((foundShape.x1 ?? 0) + (foundShape.x2 ?? 0)) / 2;
           const cy = ((foundShape.y1 ?? 0) + (foundShape.y2 ?? 0)) / 2;
           const dx = coordinates.x - cx;
@@ -463,38 +627,55 @@ export const useDraw = (
             id: foundShape.id,
             offsetX: 0,
             offsetY: 0,
-            rotate: true,
+            operation: "rotate",
             initialAngle: foundShape.angle ?? 0,
             initialMouseAngle,
           });
           canvas.style.cursor = "grabbing";
           return;
-        } else {
-          // перетаскивание
+        }
+
+        if (operation === "resize") {
+          // Начало изменения размера фигуры
           setDraggingItem({
             type: "shape",
             id: foundShape.id,
-            offsetX,
-            offsetY,
+            offsetX: coordinates.x - (foundShape.x2 ?? 0),
+            offsetY: coordinates.y - (foundShape.y2 ?? 0),
+            operation: "resize",
           });
-          canvas.style.cursor = "move";
+          canvas.style.cursor = "nwse-resize";
           return;
         }
+
+        // Если не на ручке, начинаем перетаскивание
+        setDraggingItem({
+          type: "shape",
+          id: foundShape.id,
+          offsetX,
+          offsetY,
+          operation: "move",
+        });
+        canvas.style.cursor = "move";
+        return;
       }
 
-      // 2) Если не нашли фигуру, ищем текст
+      // 2) Если фигуру не нашли, ищем текст
       const ctx = canvas.getContext("2d");
       if (ctx) {
         let foundText: DrawnText | null = null;
-        for (let i = texts.length - 1; i >= 0; i--) {
-          const txt = texts[i];
+        const currentPageTexts = textsByPage[currentPageIndex] || [];
+        for (let i = currentPageTexts.length - 1; i >= 0; i--) {
+          const txt = currentPageTexts[i];
           ctx.font = `${txt.fontSize}px sans-serif`;
           const lines = txt.text.split("\n");
           const lineHeight = txt.fontSize * 1.2;
           let maxWidth = 0;
           for (const line of lines) {
             const w = ctx.measureText(line).width;
-            if (w > maxWidth) maxWidth = w;
+            if (w > maxWidth) {
+              maxWidth = w;
+            }
           }
           const totalHeight = lines.length * lineHeight;
           const margin = 6;
@@ -505,26 +686,44 @@ export const useDraw = (
           const right = left + width;
           const bottom = top + height;
 
-          // Проверяем handle (10x10) в правом верхнем углу
+          // Проверяем ручку для вращения
           if (txt.selected) {
             const handleSize = 10;
-            const hx1 = right - handleSize;
-            const hy1 = top;
-            const hx2 = right;
-            const hy2 = top + handleSize;
+
+            // Ручка для вращения (правый верхний угол)
+            const rotateHx1 = right - handleSize;
+            const rotateHy1 = top;
+            const rotateHx2 = right;
+            const rotateHy2 = top + handleSize;
             if (
-              coordinates.x >= hx1 &&
-              coordinates.x <= hx2 &&
-              coordinates.y >= hy1 &&
-              coordinates.y <= hy2
+              coordinates.x >= rotateHx1 &&
+              coordinates.x <= rotateHx2 &&
+              coordinates.y >= rotateHy1 &&
+              coordinates.y <= rotateHy2
             ) {
               foundText = txt;
-              rotateHandle = true;
+              operation = "rotate";
+              break;
+            }
+
+            // Ручка для изменения размера (правый нижний угол)
+            const resizeHx1 = right - handleSize;
+            const resizeHy1 = bottom - handleSize;
+            const resizeHx2 = right;
+            const resizeHy2 = bottom;
+            if (
+              coordinates.x >= resizeHx1 &&
+              coordinates.x <= resizeHx2 &&
+              coordinates.y >= resizeHy1 &&
+              coordinates.y <= resizeHy2
+            ) {
+              foundText = txt;
+              operation = "resize";
               break;
             }
           }
 
-          // Проверяем сам box
+          // Проверяем область текста
           if (
             coordinates.x >= left &&
             coordinates.x <= right &&
@@ -544,8 +743,8 @@ export const useDraw = (
             const lines = foundText.text.split("\n");
             const lineHeight = foundText.fontSize * 1.2;
 
-            // Считаем, какую строку кликнули по Y
-            let totalSoFar = 0; // это будет «суммарный индекс» с учётом предыдущих строк
+            // Определяем, в какую строку был клик по Y
+            let totalSoFar = 0; // Суммарный индекс с учётом предыдущих строк
             let clickedLineIndex = -1;
             for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
               const lineTop = foundText.y + lineIdx * lineHeight - foundText.fontSize;
@@ -554,7 +753,7 @@ export const useDraw = (
                 clickedLineIndex = lineIdx;
                 break;
               }
-              // если не попали в эту строку, добавим (lines[lineIdx].length + 1) к totalSoFar
+              // Если не попали в эту строку, добавляем (lines[lineIdx].length + 1) к totalSoFar
               totalSoFar += lines[lineIdx].length + 1; // +1 за символ \n
             }
 
@@ -562,7 +761,7 @@ export const useDraw = (
               newCursorIndex = foundText.text.length;
             } else {
               const lineText = lines[clickedLineIndex];
-              let cIndex = 0; // индекс символа внутри строки
+              let cIndex = 0; // Индекс символа внутри строки
 
               for (let c = 0; c < lineText.length; c++) {
                 const part = lineText.slice(0, c);
@@ -580,40 +779,39 @@ export const useDraw = (
             }
           }
 
-          // Теперь меняем состояние
-          setTexts((prev) =>
-            prev.map((t) =>
-              t.id === foundText!.id
+          // Обновляем состояние текста
+          setTextsByPage((prev) => {
+            const newArr = [...prev];
+            const pageIndex = currentPageIndex;
+            const oldPageTexts = [...(newArr[pageIndex] || [])];
+            newArr[pageIndex] = oldPageTexts.map((t) =>
+              t.id === foundText?.id
                 ? {
                     ...t,
                     selected: true,
-                    cursorIndex: newCursorIndex, // <-- ключевой момент
+                    cursorIndex: newCursorIndex,
                   }
                 : {
                     ...t,
                     selected: false,
                     cursorIndex: undefined,
                   },
-            ),
-          );
-          setShapes((prev) => prev.map((s) => ({ ...s, selected: false })));
-          if (rotateHandle) {
-            // вращаем текст
-            const angle0 = foundText.angle ?? 0;
-            // Центр текста
-            ctx.font = `${foundText.fontSize}px sans-serif`;
-            const lines = foundText.text.split("\n");
-            let maxWidth = 0;
-            lines.forEach((l) => {
-              const w = ctx.measureText(l).width;
-              if (w > maxWidth) maxWidth = w;
-            });
-            const totalHeight = lines.length * foundText.fontSize * 1.2;
+            );
+            return newArr;
+          });
 
-            // Центр
-            const cx = foundText.x + maxWidth / 2;
-            const cy = foundText.y - foundText.fontSize + totalHeight / 2;
+          // Сброс выделения фигур
+          setShapesByPage((prev) => {
+            const newArr = [...prev];
+            const oldPageShapes = [...(newArr[currentPageIndex] || [])];
+            newArr[currentPageIndex] = oldPageShapes.map((s) => ({ ...s, selected: false }));
+            return newArr;
+          });
 
+          if (operation === "rotate") {
+            // Начало вращения текста
+            const cx = foundText.x;
+            const cy = foundText.y;
             const dx = coordinates.x - cx;
             const dy = coordinates.y - cy;
             const initialMouseAngle = Math.atan2(dy, dx);
@@ -622,31 +820,47 @@ export const useDraw = (
               id: foundText.id,
               offsetX: 0,
               offsetY: 0,
-              rotate: true,
-              initialAngle: angle0,
+              operation: "rotate",
+              initialAngle: foundText.angle ?? 0,
               initialMouseAngle,
             });
             canvas.style.cursor = "grabbing";
             return;
-          } else {
-            // перетаскивание
-            setDraggingItem({
-              type: "text",
-              id: foundText.id,
-              offsetX,
-              offsetY,
-            });
-            canvas.style.cursor = "move";
-            return;
           }
+
+          // Если не на ручке, начинаем перетаскивание
+          setDraggingItem({
+            type: "text",
+            id: foundText.id,
+            offsetX,
+            offsetY,
+            operation: "move",
+          });
+          canvas.style.cursor = "move";
+          return;
         }
       }
 
       // 3) Если инструмент = "text" и не нашли существующий
       if (selectedTool === "text") {
         setDraggingItem(null);
-        setShapes((prev) => prev.map((s) => ({ ...s, selected: false })));
-        setTexts((prev) => prev.map((t) => ({ ...t, selected: false, cursorIndex: undefined })));
+        setShapesByPage((prev) => {
+          const newArr = [...prev];
+          const oldPageShapes = [...(newArr[currentPageIndex] || [])];
+          newArr[currentPageIndex] = oldPageShapes.map((s) => ({ ...s, selected: false }));
+          return newArr;
+        });
+        setTextsByPage((prev) => {
+          const newArr = [...prev];
+          const pageIndex = currentPageIndex;
+          const oldPageTexts = [...(newArr[pageIndex] || [])];
+          newArr[pageIndex] = oldPageTexts.map((t) => ({
+            ...t,
+            selected: false,
+            cursorIndex: undefined,
+          }));
+          return newArr;
+        });
         setTextPosition(coordinates);
         return;
       }
@@ -666,7 +880,13 @@ export const useDraw = (
           color: "#000", // не используется
           lineWidth: 1,
         };
-        setShapes((prev) => [...prev, newShape]);
+        setShapesByPage((prev) => {
+          const newArr = [...prev];
+          const shapesForPage = newArr[currentPageIndex] ? [...newArr[currentPageIndex]] : [];
+          shapesForPage.push(newShape);
+          newArr[currentPageIndex] = shapesForPage;
+          return newArr;
+        });
         setImageForInsert(null);
         return;
       }
@@ -690,7 +910,12 @@ export const useDraw = (
       // line / rectangle / circle / triangle
       setIsPainting(true);
       setMouseDownPosition(coordinates);
-      setShapes((prev) => prev.map((s) => ({ ...s, selected: false })));
+      setShapesByPage((prev) => {
+        const newArr = [...prev];
+        const oldPageShapes = [...(newArr[currentPageIndex] || [])];
+        newArr[currentPageIndex] = oldPageShapes.map((s) => ({ ...s, selected: false }));
+        return newArr;
+      });
       const newId = shapeIdCounter++;
       const newShape: DrawnShape = {
         id: newId,
@@ -706,7 +931,16 @@ export const useDraw = (
       };
       setCurrentShape(newShape);
     },
-    [selectedTool, imageForInsert, selectedColor, lineWidth, shapes, texts],
+    [
+      shapesByPage,
+      currentPageIndex,
+      selectedTool,
+      imageForInsert,
+      selectedColor,
+      lineWidth,
+      setImageForInsert,
+      textsByPage,
+    ],
   );
 
   /**
@@ -719,15 +953,110 @@ export const useDraw = (
       if (!coordinates) return;
 
       const canvas = canvasRef.current;
-      canvas.style.cursor = "default";
 
-      // Если перетаскиваем или вращаем
+      if (!draggingItem) {
+        let isOverHandle = false;
+
+        // Проверяем «ручки» у фигур
+        shapesByPage[currentPageIndex]?.forEach((shp) => {
+          if (shp.selected && !shp.path) {
+            const handleSize = 10;
+            const left = Math.min(shp.x1 ?? 0, shp.x2 ?? 0);
+            const right = Math.max(shp.x1 ?? 0, shp.x2 ?? 0);
+            const top = Math.min(shp.y1 ?? 0, shp.y2 ?? 0);
+            const bottom = Math.max(shp.y1 ?? 0, shp.y2 ?? 0);
+
+            // rotate handle (правый верх)
+            const rotateHx1 = right - handleSize;
+            const rotateHy1 = top;
+            const rotateHx2 = right;
+            const rotateHy2 = top + handleSize;
+
+            // resize handle (правый низ)
+            const resizeHx1 = right - handleSize;
+            const resizeHy1 = bottom - handleSize;
+            const resizeHx2 = right;
+            const resizeHy2 = bottom;
+
+            if (
+              (coordinates.x >= rotateHx1 &&
+                coordinates.x <= rotateHx2 &&
+                coordinates.y >= rotateHy1 &&
+                coordinates.y <= rotateHy2) ||
+              (coordinates.x >= resizeHx1 &&
+                coordinates.x <= resizeHx2 &&
+                coordinates.y >= resizeHy1 &&
+                coordinates.y <= resizeHy2)
+            ) {
+              isOverHandle = true;
+            }
+          }
+        });
+
+        // Проверяем «ручки» у текстов
+        textsByPage[currentPageIndex]?.forEach((txt) => {
+          if (txt.selected) {
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+
+            ctx.font = `${txt.fontSize}px sans-serif`;
+            const lines = txt.text.split("\n");
+            const lineHeight = txt.fontSize * 1.2;
+            let maxWidth = 0;
+            for (const line of lines) {
+              const w = ctx.measureText(line).width;
+              if (w > maxWidth) maxWidth = w;
+            }
+            const totalHeight = lines.length * lineHeight;
+            const margin = 6;
+
+            const left = txt.x - margin;
+            const top = txt.y - txt.fontSize - margin;
+            const width = maxWidth + margin * 2;
+            const height = totalHeight + margin * 2 - (lineHeight - txt.fontSize);
+            const right = left + width;
+            const bottom = top + height;
+
+            const handleSize = 10;
+            // rotate handle
+            const rotateHx1 = right - handleSize;
+            const rotateHy1 = top;
+            const rotateHx2 = right;
+            const rotateHy2 = top + handleSize;
+
+            // resize handle
+            const resizeHx1 = right - handleSize;
+            const resizeHy1 = bottom - handleSize;
+            const resizeHx2 = right;
+            const resizeHy2 = bottom;
+
+            if (
+              (coordinates.x >= rotateHx1 &&
+                coordinates.x <= rotateHx2 &&
+                coordinates.y >= rotateHy1 &&
+                coordinates.y <= rotateHy2) ||
+              (coordinates.x >= resizeHx1 &&
+                coordinates.x <= resizeHx2 &&
+                coordinates.y >= resizeHy1 &&
+                coordinates.y <= resizeHy2)
+            ) {
+              isOverHandle = true;
+            }
+          }
+        });
+
+        canvas.style.cursor = isOverHandle ? "grab" : "default";
+      }
+
+      // Если перетаскиваем, вращаем или изменяем размер
       if (draggingItem) {
-        // 1) Фигуры
-        if (draggingItem.type === "shape") {
-          if (draggingItem.rotate) {
-            const shp = shapes.find((s) => s.id === draggingItem.id);
-            if (!shp || shp.path) return;
+        const { type, id, operation } = draggingItem;
+
+        if (type === "shape") {
+          const shp = shapesByPage[currentPageIndex]?.find((s) => s.id === id);
+          if (!shp) return;
+
+          if (operation === "rotate") {
             const cx = ((shp.x1 ?? 0) + (shp.x2 ?? 0)) / 2;
             const cy = ((shp.y1 ?? 0) + (shp.y2 ?? 0)) / 2;
             const dx = coordinates.x - cx;
@@ -735,88 +1064,121 @@ export const useDraw = (
             const currentAngle = Math.atan2(dy, dx);
             const delta = currentAngle - (draggingItem.initialMouseAngle ?? 0);
             const newAngle = (draggingItem.initialAngle ?? 0) + (delta * 180) / Math.PI;
-            setShapes((prev) => prev.map((s) => (s.id === shp.id ? { ...s, angle: newAngle } : s)));
+
+            setShapesByPage((prev) => {
+              const newArr = [...prev];
+              const oldPageShapes = [...(newArr[currentPageIndex] || [])];
+              newArr[currentPageIndex] = oldPageShapes.map((s) =>
+                s.id === shp.id ? { ...s, angle: newAngle } : s,
+              );
+              return newArr;
+            });
             canvas.style.cursor = "grabbing";
             return;
-          } else {
-            // перетаскивание
-            setShapes((prev) =>
-              prev.map((s) => {
-                if (s.id === draggingItem.id) {
-                  if (s.path) {
-                    const dx = coordinates.x - draggingItem.offsetX;
-                    const dy = coordinates.y - draggingItem.offsetY;
-                    const shiftX = dx - (s.path[0]?.x ?? dx);
-                    const shiftY = dy - (s.path[0]?.y ?? dy);
-                    const newPath = s.path.map((p) => ({
-                      x: p.x + shiftX,
-                      y: p.y + shiftY,
-                    }));
-                    return { ...s, path: newPath };
-                  } else {
-                    const w = (s.x2 ?? 0) - (s.x1 ?? 0);
-                    const h = (s.y2 ?? 0) - (s.y1 ?? 0);
-                    const x1 = coordinates.x - draggingItem.offsetX;
-                    const y1 = coordinates.y - draggingItem.offsetY;
-                    return {
-                      ...s,
-                      x1,
-                      y1,
-                      x2: x1 + w,
-                      y2: y1 + h,
-                    };
-                  }
-                }
-                return s;
-              }),
-            );
+          }
+
+          if (operation === "resize") {
+            const newX2 = coordinates.x - draggingItem.offsetX;
+            const newY2 = coordinates.y - draggingItem.offsetY;
+            const minWidth = 50;
+            const minHeight = 50;
+            const maxWidth = 2000; // Примерное значение
+            const maxHeight = 2000; // Примерное значение
+
+            const width = newX2 - (shp.x1 ?? 0);
+            const height = newY2 - (shp.y1 ?? 0);
+
+            if (width < minWidth || height < minHeight || width > maxWidth || height > maxHeight) {
+              return;
+            }
+
+            setShapesByPage((prev) => {
+              const newArr = [...prev];
+              const oldPageShapes = [...(newArr[currentPageIndex] || [])];
+              newArr[currentPageIndex] = oldPageShapes.map((s) =>
+                s.id === id ? { ...s, x2: newX2, y2: newY2 } : s,
+              );
+              return newArr;
+            });
+            canvas.style.cursor = "nwse-resize";
+            return;
+          }
+
+          if (operation === "move") {
+            if (shp.path) {
+              // Перемещение карандаша/ластика
+              const newPath = shp.path.map((p) => ({
+                x: p.x + (coordinates.x - shp.path![0].x - draggingItem.offsetX),
+                y: p.y + (coordinates.y - shp.path![0].y - draggingItem.offsetY),
+              }));
+              setShapesByPage((prev) => {
+                const newArr = [...prev];
+                const oldPageShapes = [...(newArr[currentPageIndex] || [])];
+                newArr[currentPageIndex] = oldPageShapes.map((s) =>
+                  s.id === id ? { ...s, path: newPath } : s,
+                );
+                return newArr;
+              });
+            } else {
+              // Перемещение других фигур
+              const newX1 = coordinates.x - draggingItem.offsetX;
+              const newY1 = coordinates.y - draggingItem.offsetY;
+              const width = (shp.x2 ?? 0) - (shp.x1 ?? 0);
+              const height = (shp.y2 ?? 0) - (shp.y1 ?? 0);
+              const newX2 = newX1 + width;
+              const newY2 = newY1 + height;
+
+              setShapesByPage((prev) => {
+                const newArr = [...prev];
+                const oldPageShapes = [...(newArr[currentPageIndex] || [])];
+                newArr[currentPageIndex] = oldPageShapes.map((s) =>
+                  s.id === id ? { ...s, x1: newX1, y1: newY1, x2: newX2, y2: newY2 } : s,
+                );
+                return newArr;
+              });
+            }
             canvas.style.cursor = "move";
             return;
           }
         }
 
-        // 2) Текст
-        else if (draggingItem.type === "text") {
-          if (draggingItem.rotate) {
-            const txt = texts.find((t) => t.id === draggingItem.id);
-            if (!txt) return;
-            // Снова ищем центр
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return;
+        if (type === "text") {
+          const txt = textsByPage[currentPageIndex]?.find((t) => t.id === id);
+          if (!txt) return;
 
-            ctx.font = `${txt.fontSize}px sans-serif`;
-            const lines = txt.text.split("\n");
-            let maxWidth = 0;
-
-            lines.forEach((l) => {
-              const w = ctx.measureText(l).width;
-              if (w > maxWidth) maxWidth = w;
-            });
-            const totalHeight = lines.length * txt.fontSize * 1.2;
-
-            const cx = txt.x + maxWidth / 2;
-            const cy = txt.y - txt.fontSize + totalHeight / 2;
+          if (operation === "rotate") {
+            const cx = txt.x;
+            const cy = txt.y;
             const dx = coordinates.x - cx;
             const dy = coordinates.y - cy;
             const currentAngle = Math.atan2(dy, dx);
             const delta = currentAngle - (draggingItem.initialMouseAngle ?? 0);
             const newAngle = (draggingItem.initialAngle ?? 0) + (delta * 180) / Math.PI;
 
-            setTexts((prev) => prev.map((t) => (t.id === txt.id ? { ...t, angle: newAngle } : t)));
+            setTextsByPage((prev) => {
+              const newArr = [...prev];
+              const oldPageTexts = [...(newArr[currentPageIndex] || [])];
+              newArr[currentPageIndex] = oldPageTexts.map((t) =>
+                t.id === txt.id ? { ...t, angle: newAngle } : t,
+              );
+              return newArr;
+            });
             canvas.style.cursor = "grabbing";
             return;
-          } else {
-            // перетаскиваем текст
-            setTexts((prev) =>
-              prev.map((t) => {
-                if (t.id === draggingItem.id) {
-                  const x = coordinates.x - draggingItem.offsetX;
-                  const y = coordinates.y - draggingItem.offsetY;
-                  return { ...t, x, y };
-                }
-                return t;
-              }),
-            );
+          }
+
+          if (operation === "move") {
+            const newX = coordinates.x - draggingItem.offsetX;
+            const newY = coordinates.y - draggingItem.offsetY;
+
+            setTextsByPage((prev) => {
+              const newArr = [...prev];
+              const oldPageTexts = [...(newArr[currentPageIndex] || [])];
+              newArr[currentPageIndex] = oldPageTexts.map((t) =>
+                t.id === id ? { ...t, x: newX, y: newY } : t,
+              );
+              return newArr;
+            });
             canvas.style.cursor = "move";
             return;
           }
@@ -835,7 +1197,7 @@ export const useDraw = (
         return;
       }
 
-      // Иначе line/rectangle/circle/triangle
+      // Если рисуем другие фигуры (line, rectangle и т.д.)
       if (isPainting && currentShape && mouseDownPosition) {
         setCurrentShape({
           ...currentShape,
@@ -844,7 +1206,15 @@ export const useDraw = (
         });
       }
     },
-    [draggingItem, shapes, texts, currentShape, isPainting, mouseDownPosition],
+    [
+      draggingItem,
+      currentShape,
+      isPainting,
+      mouseDownPosition,
+      shapesByPage,
+      textsByPage,
+      currentPageIndex,
+    ],
   );
 
   /**
@@ -859,27 +1229,53 @@ export const useDraw = (
     setDraggingItem(null);
 
     if (currentShape) {
-      setShapes((prev) => [...prev, currentShape]);
+      setShapesByPage((prev) => {
+        const newArr = [...prev];
+        const pageIndex = currentPageIndex;
+        const shapesForPage = newArr[pageIndex] ? [...newArr[pageIndex]] : [];
+        shapesForPage.push(currentShape);
+        newArr[pageIndex] = shapesForPage;
+        return newArr;
+      });
+
       setCurrentShape(null);
     }
-  }, [currentShape]);
+  }, [currentShape, currentPageIndex]);
 
   useEffect(() => {
-    if (!canvasRef.current) return;
     const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    canvas.addEventListener("mousedown", startPaint);
-    canvas.addEventListener("mousemove", paint);
-    canvas.addEventListener("mouseup", exitPaint);
-    canvas.addEventListener("mouseleave", exitPaint);
+    const handleMouseDown = (event: MouseEvent) => {
+      startPaint(event);
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      paint(event);
+    };
+
+    const handleMouseUp = () => {
+      exitPaint();
+    };
+
+    canvas.addEventListener("mousedown", handleMouseDown);
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseup", handleMouseUp);
+    canvas.addEventListener("mouseleave", handleMouseUp);
 
     return () => {
-      canvas.removeEventListener("mousedown", startPaint);
-      canvas.removeEventListener("mousemove", paint);
-      canvas.removeEventListener("mouseup", exitPaint);
-      canvas.removeEventListener("mouseleave", exitPaint);
+      canvas.removeEventListener("mousedown", handleMouseDown);
+      canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("mouseup", handleMouseUp);
+      canvas.removeEventListener("mouseleave", handleMouseUp);
     };
   }, [startPaint, paint, exitPaint]);
+
+  const goToPage = (idx: number) => {
+    if (idx >= 0 && idx < pdfPages.length) {
+      setCurrentPageIndex(idx);
+    }
+  };
 
   /**
    * Клавиатурные события
@@ -887,35 +1283,53 @@ export const useDraw = (
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "r" || event.key === "R") {
-        setShapes((prev) =>
-          prev.map((sh) => (sh.selected ? { ...sh, angle: (sh.angle ?? 0) + 15 } : sh)),
-        );
+        setShapesByPage((prev) => {
+          const newArr = [...prev];
+          const oldPageShapes = [...(newArr[currentPageIndex] || [])];
+          newArr[currentPageIndex] = oldPageShapes.map((s) =>
+            s.selected
+              ? {
+                  ...s,
+                  angle: (s.angle ?? 0) + 15,
+                }
+              : s,
+          );
+          return newArr;
+        });
       }
 
       if (selectedTool !== "text") return;
 
-      const activeText = texts.find((t) => t.selected);
+      const activeText = textsByPage[currentPageIndex]?.find((t) => t.selected);
       if (activeText) {
         if (ignoreKeys.includes(event.key)) return;
         const cursorIndex = activeText.cursorIndex ?? activeText.text.length;
 
         if (event.key === "ArrowLeft") {
           if (cursorIndex > 0) {
-            setTexts((prev) =>
-              prev.map((txt) =>
-                txt.id === activeText.id ? { ...txt, cursorIndex: cursorIndex - 1 } : txt,
-              ),
-            );
+            setTextsByPage((prev) => {
+              const newArr = [...prev];
+              const pageIndex = currentPageIndex;
+              const oldPageTexts = [...(newArr[pageIndex] || [])];
+              newArr[pageIndex] = oldPageTexts.map((t) =>
+                t.id === activeText.id ? { ...t, cursorIndex: cursorIndex - 1 } : t,
+              );
+              return newArr;
+            });
           }
           return;
         }
         if (event.key === "ArrowRight") {
           if (cursorIndex < activeText.text.length) {
-            setTexts((prev) =>
-              prev.map((txt) =>
-                txt.id === activeText.id ? { ...txt, cursorIndex: cursorIndex + 1 } : txt,
-              ),
-            );
+            setTextsByPage((prev) => {
+              const newArr = [...prev];
+              const pageIndex = currentPageIndex;
+              const oldPageTexts = [...(newArr[pageIndex] || [])];
+              newArr[pageIndex] = oldPageTexts.map((t) =>
+                t.id === activeText.id ? { ...t, cursorIndex: cursorIndex + 1 } : t,
+              );
+              return newArr;
+            });
           }
           return;
         }
@@ -923,13 +1337,15 @@ export const useDraw = (
         if (event.key === "Enter") {
           const newText =
             activeText.text.slice(0, cursorIndex) + "\n" + activeText.text.slice(cursorIndex);
-          setTexts((prev) =>
-            prev.map((txt) =>
-              txt.id === activeText.id
-                ? { ...txt, text: newText, cursorIndex: cursorIndex + 1 }
-                : txt,
-            ),
-          );
+          setTextsByPage((prev) => {
+            const newArr = [...prev];
+            const pageIndex = currentPageIndex;
+            const oldPageTexts = [...(newArr[pageIndex] || [])];
+            newArr[pageIndex] = oldPageTexts.map((t) =>
+              t.id === activeText.id ? { ...t, text: newText, cursorIndex: cursorIndex + 1 } : t,
+            );
+            return newArr;
+          });
           return;
         }
 
@@ -937,38 +1353,46 @@ export const useDraw = (
           if (cursorIndex > 0) {
             const newText =
               activeText.text.slice(0, cursorIndex - 1) + activeText.text.slice(cursorIndex);
-            setTexts((prev) =>
-              prev.map((txt) =>
-                txt.id === activeText.id
+            setTextsByPage((prev) => {
+              const newArr = [...prev];
+              const pageIndex = currentPageIndex;
+              const oldPageTexts = [...(newArr[pageIndex] || [])];
+              newArr[pageIndex] = oldPageTexts.map((t) =>
+                t.id === activeText.id
                   ? {
-                      ...txt,
+                      ...t,
                       text: newText,
                       cursorIndex: cursorIndex - 1,
                     }
-                  : txt,
-              ),
-            );
+                  : t,
+              );
+              return newArr;
+            });
           }
           return;
         }
 
         // Пример: если нажата обычная буква
         if (event.key.length === 1) {
-          setTexts((prev) =>
-            prev.map((txt) => {
-              if (txt.id === activeText.id) {
+          setTextsByPage((prev) => {
+            const newArr = [...prev];
+            const pageIndex = currentPageIndex;
+            const oldPageTexts = [...(newArr[pageIndex] || [])];
+            newArr[pageIndex] = oldPageTexts.map((t) => {
+              if (t.id === activeText.id) {
                 // Собираем новый текст
                 const newText =
-                  txt.text.slice(0, cursorIndex) + event.key + txt.text.slice(cursorIndex);
+                  t.text.slice(0, cursorIndex) + event.key + t.text.slice(cursorIndex);
                 return {
-                  ...txt,
+                  ...t,
                   text: newText,
                   cursorIndex: cursorIndex + 1,
                 };
               }
-              return txt;
-            }),
-          );
+              return t;
+            });
+            return newArr;
+          });
         }
         return;
       }
@@ -982,9 +1406,16 @@ export const useDraw = (
 
         if (event.key.length === 1) {
           const newId = textIdCounter++;
-          setTexts((prev) => [
-            ...prev.map((t) => ({ ...t, selected: false, cursorIndex: undefined })),
-            {
+          setTextsByPage((prev) => {
+            const newArr = [...prev];
+            const pageIndex = currentPageIndex;
+            const oldPageTexts = newArr[pageIndex] ? [...newArr[pageIndex]] : [];
+            const updatedTexts = oldPageTexts.map((t) => ({
+              ...t,
+              selected: false,
+              cursorIndex: undefined as number | undefined,
+            }));
+            updatedTexts.push({
               id: newId,
               text: event.key,
               x: textPosition.x,
@@ -993,10 +1424,11 @@ export const useDraw = (
               fontSize: 16,
               selected: true,
               cursorIndex: 1,
-              // NEW: добавим angle = 0
               angle: 0,
-            },
-          ]);
+            });
+            newArr[pageIndex] = updatedTexts;
+            return newArr;
+          });
           setTextPosition(null);
         } else if (event.key === "Backspace") {
           // игнор
@@ -1008,7 +1440,7 @@ export const useDraw = (
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [selectedTool, textPosition, texts, selectedColor]);
+  }, [selectedTool, textPosition, selectedColor, textsByPage, currentPageIndex]);
 
   const saveCanvasAsPNG = useCallback(() => {
     if (!canvasRef.current) return;
@@ -1017,7 +1449,7 @@ export const useDraw = (
     const dataURL = canvas.toDataURL("image/png");
     const link = document.createElement("a");
     link.href = dataURL;
-    link.download = "myDrawing.png"; // любое имя файла
+    link.download = "myDrawing.png";
     link.click();
   }, []);
 
@@ -1030,23 +1462,91 @@ export const useDraw = (
     const widthPt = widthPx * pxToPt;
     const heightPt = heightPx * pxToPt;
     const dataURL = canvas.toDataURL("image/png");
-
     const pdf = new jsPDF({
       orientation: widthPt > heightPt ? "landscape" : "portrait",
       unit: "pt",
       format: [widthPt, heightPt],
     });
-
     pdf.addImage(dataURL, "PNG", 0, 0, widthPt, heightPt);
     pdf.save("myDrawing.pdf");
   }, []);
 
+  const saveAllPagesAsPDF = useCallback(() => {
+    if (pdfPages.length === 0) return;
+    let pdf = new jsPDF();
+    pdfPages.forEach((basePageCanvas, pageIndex) => {
+      const finalCanvas = renderPageToCanvas(pageIndex);
+      const widthPx = finalCanvas.width;
+      const heightPx = finalCanvas.height;
+      const pxToPt = 72 / 96;
+      const widthPt = widthPx * pxToPt;
+      const heightPt = heightPx * pxToPt;
+      const dataURL = finalCanvas.toDataURL("image/png");
+      if (pageIndex === 0) {
+        pdf = new jsPDF({
+          orientation: widthPt > heightPt ? "landscape" : "portrait",
+          unit: "pt",
+          format: [widthPt, heightPt],
+        });
+      } else {
+        pdf!.addPage([widthPt, heightPt], widthPt > heightPt ? "landscape" : "portrait");
+      }
+      pdf!.addImage(dataURL, "PNG", 0, 0, widthPt, heightPt);
+    });
+
+    if (pdf) {
+      pdf.save("myDrawing.pdf");
+    }
+  }, [pdfPages, renderPageToCanvas]);
+
+  /**
+   * Создать новую пустую страницу
+   */
+  const addBlankPage = () => {
+    const w = window.innerWidth - 130;
+    const h = window.innerHeight - 110;
+    const blankCanvas = document.createElement("canvas");
+    blankCanvas.width = w;
+    blankCanvas.height = h;
+
+    const ctx = blankCanvas.getContext("2d");
+    if (ctx) {
+      ctx.fillStyle = "#f9f8f8";
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    setPdfPages((prev) => {
+      const newPages = [...prev, blankCanvas];
+      setCurrentPageIndex(newPages.length - 1);
+      return newPages;
+    });
+
+    setShapesByPage((prev) => [...prev, []]);
+    setTextsByPage((prev) => [...prev, []]);
+  };
+
   return {
     canvasRef,
     handleFileUpload,
-    shapes,
-    texts,
+    pdfPages,
+    currentPageIndex,
+    setCurrentPageIndex: goToPage,
     saveCanvasAsPNG,
-    saveCanvasAsPDF,
+    saveAllPagesAsPDF,
+    addBlankPage,
   };
 };
+
+function rotatePoint(
+  cx: number,
+  cy: number,
+  x: number,
+  y: number,
+  angleRad: number,
+): { x: number; y: number } {
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  const nx = cos * (x - cx) - sin * (y - cy) + cx;
+  const ny = sin * (x - cx) + cos * (y - cy) + cy;
+  return { x: nx, y: ny };
+}
