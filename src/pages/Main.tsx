@@ -29,6 +29,7 @@ export const Main = () => {
     setLineWidth(newValue > 0 ? newValue : 1);
   };
 
+  const [textSize, setTextSize] = useState<number>(16);
   const [imageForInsert, setImageForInsert] = useState<HTMLImageElement | null>(null);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -50,7 +51,7 @@ export const Main = () => {
     saveCanvasAsPNG,
     saveAllPagesAsPDF,
     addBlankPage,
-  } = useDraw(selectedTool, selectedColor, lineWidth, imageForInsert, setImageForInsert);
+  } = useDraw(selectedTool, selectedColor, lineWidth, textSize, imageForInsert, setImageForInsert);
 
   return (
     <Layout>
@@ -71,7 +72,7 @@ export const Main = () => {
           <Parameters>
             <LineWidthSection lineWidth={lineWidth} handleLineWidthChange={handleLineWidthChange} />
             <ColorsSection selectedColor={selectedColor} handleClick={handleChooseColor} />
-            <TextSizeSection size={5} handleSizeChange={() => console.log("size")} />
+            <TextSizeSection size={textSize} handleSizeChange={setTextSize} />
           </Parameters>
           <DownloadSection>
             <ImportButton onClick={handleFileUpload} text={"импорт PNG"} />

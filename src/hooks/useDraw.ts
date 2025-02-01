@@ -21,6 +21,7 @@ export const useDraw = (
   selectedTool: ToolsType,
   selectedColor: ColorOfToolType,
   lineWidth: number,
+  selectedFontSize: number,
   imageForInsert: HTMLImageElement | null,
   setImageForInsert: React.Dispatch<React.SetStateAction<HTMLImageElement | null>>,
 ) => {
@@ -61,6 +62,8 @@ export const useDraw = (
       }
 
       setPdfPages([blankCanvas]);
+      setShapesByPage([[]]);
+      setTextsByPage([[]]);
     }
   }, [pdfPages]);
 
@@ -841,7 +844,6 @@ export const useDraw = (
         }
       }
 
-      // 3) Если инструмент = "text" и не нашли существующий
       if (selectedTool === "text") {
         setDraggingItem(null);
         setShapesByPage((prev) => {
@@ -1282,6 +1284,16 @@ export const useDraw = (
    */
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      if (
+        activeEl &&
+        (activeEl.tagName === "INPUT" ||
+          activeEl.tagName === "TEXTAREA" ||
+          activeEl.tagName === "SELECT")
+      ) {
+        return;
+      }
+
       if (event.key === "r" || event.key === "R") {
         setShapesByPage((prev) => {
           const newArr = [...prev];
@@ -1421,7 +1433,7 @@ export const useDraw = (
               x: textPosition.x,
               y: textPosition.y,
               color: selectedColor,
-              fontSize: 16,
+              fontSize: selectedFontSize,
               selected: true,
               cursorIndex: 1,
               angle: 0,
@@ -1440,7 +1452,7 @@ export const useDraw = (
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [selectedTool, textPosition, selectedColor, textsByPage, currentPageIndex]);
+  }, [selectedTool, textPosition, selectedColor, textsByPage, currentPageIndex, selectedFontSize]);
 
   const saveCanvasAsPNG = useCallback(() => {
     if (!canvasRef.current) return;
